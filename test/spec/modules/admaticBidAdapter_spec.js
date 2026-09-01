@@ -1,13 +1,13 @@
 import { expect } from 'chai';
 import { spec } from 'modules/admaticBidAdapter.js';
 import { newBidder } from 'src/adapters/bidderFactory.js';
-import { config } from 'src/config.js';
+import { BANNER, NATIVE, VIDEO } from 'src/mediaTypes.js';
 
-const ENDPOINT = 'https://layer.serve.admatic.com.tr/pb';
+const ENDPOINT = 'https://layer.rtb.admatic.com.tr/pb';
 
 describe('admaticBidAdapter', () => {
   const adapter = newBidder(spec);
-  let validRequest = [ {
+  const validRequest = [{
     'refererInfo': {
       'page': 'https://www.admatic.com.tr',
       'domain': 'https://www.admatic.com.tr',
@@ -15,7 +15,7 @@ describe('admaticBidAdapter', () => {
     'bidder': 'admatic',
     'params': {
       'networkId': 10433394,
-      'host': 'layer.serve.admatic.com.tr'
+      'host': 'layer.rtb.admatic.com.tr'
     },
     'ortb2Imp': { 'ext': { 'instl': 1 } },
     'ortb2': { 'badv': ['admatic.com.tr'] },
@@ -50,7 +50,7 @@ describe('admaticBidAdapter', () => {
           floor: 1.0
         };
       } else {
-        return {}
+        return {};
       }
     },
     'schain': {
@@ -181,7 +181,7 @@ describe('admaticBidAdapter', () => {
         },
         'floors': {
           'video': {
-            '338x280': { 'currency': 'USD', 'floor': 1 }
+            '336x280': { 'currency': 'USD', 'floor': 1 }
           }
         },
         'id': '45e86fc7ce7fc93'
@@ -241,8 +241,8 @@ describe('admaticBidAdapter', () => {
       'cur': 'USD',
       'bidder': 'admatic'
     }
-  } ];
-  let bidderRequest = {
+  }];
+  const bidderRequest = {
     'refererInfo': {
       'page': 'https://www.admatic.com.tr',
       'domain': 'https://www.admatic.com.tr',
@@ -250,7 +250,7 @@ describe('admaticBidAdapter', () => {
     'bidder': 'admatic',
     'params': {
       'networkId': 10433394,
-      'host': 'layer.serve.admatic.com.tr'
+      'host': 'layer.rtb.admatic.com.tr'
     },
     'ortb2Imp': { 'ext': { 'instl': 1 } },
     'ortb2': { 'badv': ['admatic.com.tr'] },
@@ -261,10 +261,6 @@ describe('admaticBidAdapter', () => {
       'native': {
       },
       'video': {
-        'playerSize': [
-          336,
-          280
-        ]
       }
     },
     'userId': {
@@ -323,7 +319,7 @@ describe('admaticBidAdapter', () => {
           floor: 1.0
         };
       } else {
-        return {}
+        return {};
       }
     },
     'schain': {
@@ -487,7 +483,7 @@ describe('admaticBidAdapter', () => {
         },
         'floors': {
           'video': {
-            '338x280': { 'currency': 'USD', 'floor': 1 }
+            '336x280': { 'currency': 'USD', 'floor': 1 }
           }
         },
         'id': '45e86fc7ce7fc93'
@@ -556,7 +552,7 @@ describe('admaticBidAdapter', () => {
   });
 
   describe('isBidRequestValid', function() {
-    let bid = {
+    const bid = {
       'refererInfo': {
         'page': 'https://www.admatic.com.tr',
         'domain': 'https://www.admatic.com.tr',
@@ -564,7 +560,7 @@ describe('admaticBidAdapter', () => {
       'bidder': 'admatic',
       'params': {
         'networkId': 10433394,
-        'host': 'layer.serve.admatic.com.tr'
+        'host': 'layer.rtb.admatic.com.tr'
       },
       'adUnitCode': 'adunit-code',
       'mediaType': 'banner',
@@ -582,7 +578,7 @@ describe('admaticBidAdapter', () => {
     });
 
     it('should return false when required params are not passed', function() {
-      let bid2 = {};
+      const bid2 = {};
       bid2.params = {
         'someIncorrectParam': 0
       };
@@ -598,7 +594,7 @@ describe('admaticBidAdapter', () => {
     });
 
     it('should not populate GDPR if for non-EEA users', function () {
-      let bidRequest = Object.assign([], validRequest);
+      const bidRequest = Object.assign([], validRequest);
       const request = spec.buildRequests(
         bidRequest,
         Object.assign({}, bidderRequest, {
@@ -613,7 +609,7 @@ describe('admaticBidAdapter', () => {
     });
 
     it('should populate GDPR and empty consent string if available for EEA users without consent string but with consent', function () {
-      let bidRequest = Object.assign([], validRequest);
+      const bidRequest = Object.assign([], validRequest);
       const request = spec.buildRequests(
         bidRequest,
         Object.assign({}, bidderRequest, {
@@ -627,7 +623,7 @@ describe('admaticBidAdapter', () => {
     });
 
     it('should properly build a request when coppa flag is true', function () {
-      let bidRequest = Object.assign([], validRequest);
+      const bidRequest = Object.assign([], validRequest);
       const request = spec.buildRequests(
         bidRequest,
         Object.assign({}, bidderRequest, {
@@ -639,7 +635,7 @@ describe('admaticBidAdapter', () => {
     });
 
     it('should properly build a request with gpp consent field', function () {
-      let bidRequest = Object.assign([], validRequest);
+      const bidRequest = Object.assign([], validRequest);
       const ortb2 = {
         regs: {
           gpp: 'gpp_consent_string',
@@ -652,7 +648,7 @@ describe('admaticBidAdapter', () => {
     });
 
     it('should properly build a request with ccpa consent field', function () {
-      let bidRequest = Object.assign([], validRequest);
+      const bidRequest = Object.assign([], validRequest);
       const request = spec.buildRequests(
         bidRequest,
         Object.assign({}, bidderRequest, {
@@ -683,7 +679,10 @@ describe('admaticBidAdapter', () => {
               }]
             }
           ],
-          params: {}
+          params: {
+            networkId: 10433394,
+            host: 'layer.rtb.admatic.com.tr'
+          }
         },
       ];
       const request = spec.buildRequests(bidRequests, bidderRequest);
@@ -701,12 +700,10 @@ describe('admaticBidAdapter', () => {
 
     it('should properly build a banner request with floors', function () {
       const request = spec.buildRequests(validRequest, bidderRequest);
-      request.data.imp[0].floors = {
-        'banner': {
-          '300x250': { 'currency': 'USD', 'floor': 1 },
-          '728x90': { 'currency': 'USD', 'floor': 2 }
-        }
-      };
+      expect(request.data.imp[0].floors.banner).to.deep.equal({
+        '300x250': { 'currency': 'USD', 'floor': 1 },
+        '728x90': { 'currency': 'USD', 'floor': 2 }
+      });
     });
 
     it('should properly build a video request with several player sizes with floors', function () {
@@ -724,7 +721,7 @@ describe('admaticBidAdapter', () => {
           'ortb2': { 'badv': ['admatic.com.tr'] },
           'params': {
             'networkId': 10433394,
-            'host': 'layer.serve.admatic.com.tr'
+            'host': 'layer.rtb.admatic.com.tr'
           },
           getFloor: inputParams => {
             if (inputParams.mediaType === VIDEO && inputParams.size[0] === 300 && inputParams.size[1] === 250) {
@@ -738,7 +735,7 @@ describe('admaticBidAdapter', () => {
                 floor: 2.0
               };
             } else {
-              return {}
+              return {};
             }
           }
         },
@@ -750,6 +747,10 @@ describe('admaticBidAdapter', () => {
         }
       };
       const request = spec.buildRequests(bidRequests, bidderRequest);
+      expect(request.data.imp[0].floors.video).to.deep.equal({
+        '300x250': { 'currency': 'USD', 'floor': 1 },
+        '728x90': { 'currency': 'USD', 'floor': 2 }
+      });
     });
 
     it('should properly build a native request with floors', function () {
@@ -766,7 +767,7 @@ describe('admaticBidAdapter', () => {
           'ortb2': { 'badv': ['admatic.com.tr'] },
           'params': {
             'networkId': 10433394,
-            'host': 'layer.serve.admatic.com.tr'
+            'host': 'layer.rtb.admatic.com.tr'
           },
           getFloor: inputParams => {
             if (inputParams.mediaType === NATIVE) {
@@ -775,7 +776,7 @@ describe('admaticBidAdapter', () => {
                 floor: 1.0
               };
             } else {
-              return {}
+              return {};
             }
           }
         },
@@ -787,71 +788,76 @@ describe('admaticBidAdapter', () => {
         }
       };
       const request = spec.buildRequests(bidRequests, bidderRequest);
+      expect(request.data.imp[0].floors.native).to.deep.equal({
+        '*': { 'currency': 'USD', 'floor': 1 }
+      });
     });
   });
 
   describe('interpretResponse', function () {
     it('should get correct bid responses', function() {
-      let bids = { body: {
-        data: [
-          {
-            'id': 1,
-            'creative_id': '374',
-            'width': 300,
-            'height': 250,
-            'price': 0.01,
-            'type': 'banner',
-            'bidder': 'admatic',
-            'currency': 'TRY',
-            'mime_type': {
-              'name': 'backfill',
-              'force': false
+      const bids = {
+        body: {
+          data: [
+            {
+              'id': 1,
+              'creative_id': '374',
+              'width': 300,
+              'height': 250,
+              'price': 0.01,
+              'type': 'banner',
+              'bidder': 'admatic',
+              'currency': 'TRY',
+              'mime_type': {
+                'name': 'backfill',
+                'force': false
+              },
+              'adomain': ['admatic.com.tr'],
+              'party_tag': '<div></div>',
+              'iurl': 'https://www.admatic.com.tr'
             },
-            'adomain': ['admatic.com.tr'],
-            'party_tag': '<div></div>',
-            'iurl': 'https://www.admatic.com.tr'
-          },
-          {
-            'id': 2,
-            'creative_id': '3741',
-            'width': 300,
-            'height': 250,
-            'price': 0.01,
-            'currency': 'TRY',
-            'type': 'video',
-            'mime_type': {
-              'name': 'backfill',
-              'force': false
+            {
+              'id': 2,
+              'creative_id': '3741',
+              'width': 300,
+              'height': 250,
+              'price': 0.01,
+              'currency': 'TRY',
+              'type': 'video',
+              'mime_type': {
+                'name': 'backfill',
+                'force': false
+              },
+              'bidder': 'admatic',
+              'adomain': ['admatic.com.tr'],
+              'party_tag': '<VAST></VAST>',
+              'iurl': 'https://www.admatic.com.tr'
             },
-            'bidder': 'admatic',
-            'adomain': ['admatic.com.tr'],
-            'party_tag': '<VAST></VAST>',
-            'iurl': 'https://www.admatic.com.tr'
-          },
-          {
-            'id': 3,
-            'creative_id': '3742',
-            'width': 1,
-            'height': 1,
-            'price': 0.01,
-            'currency': 'TRY',
-            'type': 'native',
-            'mime_type': {
-              'name': 'backfill',
-              'force': false
-            },
-            'bidder': 'admatic',
-            'adomain': ['admatic.com.tr'],
-            'party_tag': '{"native":{"ver":"1.1","assets":[{"id":1,"title":{"text":"title"}},{"id":4,"data":{"value":"body"}},{"id":5,"data":{"value":"sponsored"}},{"id":6,"data":{"value":"cta"}},{"id":2,"img":{"url":"https://www.admatic.com.tr","w":1200,"h":628}},{"id":3,"img":{"url":"https://www.admatic.com.tr","w":640,"h":480}}],"link":{"url":"https://www.admatic.com.tr"},"imptrackers":["https://www.admatic.com.tr"]}}',
-            'iurl': 'https://www.admatic.com.tr'
-          }
-        ],
-        'cur': 'TRY',
-        'queryId': 'cdnbh24rlv0hhkpfpln0',
-        'status': true
-      }};
+            {
+              'id': 3,
+              'creative_id': '3742',
+              'width': 1,
+              'height': 1,
+              'price': 0.01,
+              'currency': 'TRY',
+              'type': 'native',
+              'mime_type': {
+                'name': 'backfill',
+                'force': false
+              },
+              'bidder': 'admatic',
+              'adomain': ['admatic.com.tr'],
+              'party_tag': '{"native":{"ver":"1.1","assets":[{"id":1,"title":{"text":"title"}},{"id":4,"data":{"value":"body"}},{"id":5,"data":{"value":"sponsored"}},{"id":6,"data":{"value":"cta"}},{"id":2,"img":{"url":"https://www.admatic.com.tr","w":1200,"h":628}},{"id":3,"img":{"url":"https://www.admatic.com.tr","w":640,"h":480}}],"link":{"url":"https://www.admatic.com.tr"},"imptrackers":["https://www.admatic.com.tr"]}}',
+              'iurl': 'https://www.admatic.com.tr'
+            }
+          ],
+          'cur': 'TRY',
+          'queryId': 'cdnbh24rlv0hhkpfpln0',
+          'status': true
+        }
+      };
 
-      let expectedResponse = [
+      const expectedResponse = [
         {
           requestId: 1,
           cpm: 0.01,
@@ -1043,7 +1049,6 @@ describe('admaticBidAdapter', () => {
             ],
             'type': 'native',
             'mediatype': {
-              'sendTargetingKeys': false,
               'ortb': {
                 'ver': '1.1',
                 'context': 2,
@@ -1134,25 +1139,27 @@ describe('admaticBidAdapter', () => {
         ]
       };
 
-      let result = spec.interpretResponse(bids, {data: request});
+      const result = spec.interpretResponse(bids, { data: request });
       expect(result).to.eql(expectedResponse);
     });
 
     it('handles nobid responses', function () {
-      let request = {
+      const request = {
         ext: {
           'cur': 'TRY',
           'type': 'admatic'
         }
       };
-      let bids = { body: {
-        data: [],
-        'queryId': 'cdnbh24rlv0hhkpfpln0',
-        'status': true,
-        'cur': 'TRY'
-      }};
+      const bids = {
+        body: {
+          data: [],
+          'queryId': 'cdnbh24rlv0hhkpfpln0',
+          'status': true,
+          'cur': 'TRY'
+        }
+      };
 
-      let result = spec.interpretResponse(bids, {data: request});
+      const result = spec.interpretResponse(bids, { data: request });
       expect(result.length).to.equal(0);
     });
   });

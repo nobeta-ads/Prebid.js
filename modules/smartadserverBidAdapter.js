@@ -9,8 +9,9 @@ import {
 } from '../src/utils.js';
 import { BANNER, VIDEO } from '../src/mediaTypes.js';
 import { config } from '../src/config.js';
-import { getBidFloor } from '../libraries/equativUtils/equativUtils.js'
+import { getBidFloor } from '../libraries/equativUtils/equativUtils.js';
 import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { getCurrencyFromBidderRequest } from '../libraries/ortb2Utils/currency.js';
 
 /**
  * @typedef {import('../src/adapters/bidderFactory.js').BidRequest} BidRequest
@@ -144,9 +145,9 @@ export const spec = {
     if (videoParams?.startDelay) {
       return videoParams.startDelay;
     } else if (videoMediaType?.startdelay) {
-      if (videoMediaType.startdelay > 0 || videoMediaType.startdelay == -1) {
+      if (videoMediaType.startdelay > 0 || videoMediaType.startdelay === -1) {
         return 2;
-      } else if (videoMediaType.startdelay == -2) {
+      } else if (videoMediaType.startdelay === -2) {
         return 3;
       }
     }
@@ -180,14 +181,14 @@ export const spec = {
    */
   buildRequests: function (validBidRequests, bidderRequest) {
     // use bidderRequest.bids[] to get bidder-dependent request info
-    const adServerCurrency = config.getConfig('currency.adServerCurrency');
+    const adServerCurrency = getCurrencyFromBidderRequest(bidderRequest);
     const sellerDefinedAudience = deepAccess(bidderRequest, 'ortb2.user.data', config.getAnyConfig('ortb2.user.data'));
     const sellerDefinedContext = deepAccess(bidderRequest, 'ortb2.site.content.data', config.getAnyConfig('ortb2.site.content.data'));
 
     // pull requested transaction ID from bidderRequest.bids[].transactionId
     return validBidRequests.reduce((bidRequests, bid) => {
       // Common bid request attributes for banner, outstream and instream.
-      let payload = {
+      const payload = {
         siteid: bid.params.siteId,
         pageid: bid.params.pageId,
         formatid: bid.params.formatId,
@@ -203,12 +204,12 @@ export const spec = {
         timeout: config.getConfig('bidderTimeout'),
         bidId: bid.bidId,
         prebidVersion: '$prebid.version$',
-        schain: spec.serializeSupplyChain(bid.schain),
+        schain: spec.serializeSupplyChain(bid?.ortb2?.source?.ext?.schain),
         sda: sellerDefinedAudience,
         sdc: sellerDefinedContext
       };
 
-      const gpid = deepAccess(bid, 'ortb2Imp.ext.gpid') || deepAccess(bid, 'ortb2Imp.ext.data.pbadslot');
+      const gpid = deepAccess(bid, 'ortb2Imp.ext.gpid');
       if (gpid) {
         payload.gpid = gpid;
       }
@@ -254,7 +255,7 @@ export const spec = {
           payload.sizes = spec.adaptBannerSizes(bannerMediaType.sizes);
 
           if (isSupportedVideoContext) {
-            let videoPayload = deepClone(payload);
+            const videoPayload = deepClone(payload);
             spec.fillPayloadForVideoBidRequest(videoPayload, videoMediaType, bid.params.video);
             videoPayload.bidfloor = bid.params.bidfloor || getBidFloor(bid, adServerCurrency, VIDEO);
             bidRequests.push(spec.createServerRequest(videoPayload, bid.params.domain));
@@ -283,12 +284,12 @@ export const spec = {
    */
   interpretResponse: function (serverResponse, bidRequestString) {
     const bidResponses = [];
-    let response = serverResponse.body;
+    const response = serverResponse.body;
     try {
       if (response && !response.isNoAd && (response.ad || response.adUrl)) {
         const bidRequest = JSON.parse(bidRequestString.data);
 
-        let bidResponse = {
+        const bidResponse = {
           requestId: bidRequest.bidId,
           cpm: response.cpm,
           width: response.width,

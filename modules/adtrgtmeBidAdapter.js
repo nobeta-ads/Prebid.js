@@ -1,333 +1,311 @@
 import { registerBidder } from '../src/adapters/bidderFactory.js';
-import { BANNER } from '../src/mediaTypes.js';
-import { deepAccess, isFn, isStr, isNumber, isArray, isEmpty, isPlainObject, generateUUID, logWarn } from '../src/utils.js';
+import { BANNER, VIDEO, NATIVE } from '../src/mediaTypes.js';
+import {
+  isStr,
+  isNumber,
+  isEmpty,
+  isArray,
+  isPlainObject,
+  deepSetValue,
+  logWarn,
+} from '../src/utils.js';
 import { config } from '../src/config.js';
 import { hasPurpose1Consent } from '../src/utils/gdpr.js';
+import { ortbConverter } from '../libraries/ortbConverter/converter.js';
 
-const INTEGRATION_METHOD = 'prebid.js';
 const BIDDER_CODE = 'adtrgtme';
-const ENDPOINT = 'https://z.cdn.adtarget.market/ssp?prebid&s=';
-const ADAPTER_VERSION = '1.0.0';
-const PREBID_VERSION = '$prebid.version$';
-const DEFAULT_BID_TTL = 300;
-const DEFAULT_CURRENCY = 'USD';
+const BIDDER_VERSION = '1.0.8';
+const BIDDER_URL = 'https://rtb.cdn.adtarget.market/ssp?prebid&s=';
+const PREBIDJS_VERSION = '$prebid.version$';
+const DEFAULT_TTL = 300;
+const DEFAULT_CUR = 'USD';
+const DEFAULT_BANNER_MIMES = [
+  'text/html',
+  'text/javascript',
+  'application/javascript',
+  'image/jpg',
+];
 
-function transformSizes(sizes) {
-  const getSize = (size) => {
-    return {
-      w: parseInt(size[0]),
-      h: parseInt(size[1])
-    }
-  }
-  if (isArray(sizes) && sizes.length === 2 && !isArray(sizes[0])) {
-    return [ getSize(sizes) ];
-  }
-  return sizes.map(getSize);
+function readConfig(key) {
+  return config.getConfig(`${BIDDER_CODE}.${key}`);
 }
 
-function extractUserSyncUrls(syncOptions, pixels) {
-  let itemsRegExp = /(img|iframe)[\s\S]*?src\s*=\s*("|')(.*?)\2/gi;
-  let tagNameRegExp = /\w*(?=\s)/;
-  let srcRegExp = /src=("|')(.*?)\1/;
-  let userSyncObjects = [];
-
-  if (pixels) {
-    let matchedItems = pixels.match(itemsRegExp);
-    if (matchedItems) {
-      matchedItems.forEach(item => {
-        let tagName = item.match(tagNameRegExp)[0];
-        let url = item.match(srcRegExp)[2];
-        if (tagName && url) {
-          let tagType = tagName.toLowerCase() === 'img' ? 'image' : 'iframe';
-          if ((!syncOptions.iframeEnabled && tagType === 'iframe') ||
-                (!syncOptions.pixelEnabled && tagType === 'image')) {
-            return;
-          }
-          userSyncObjects.push({
-            type: tagType,
-            url: url
-          });
-        }
-      });
-    }
-  }
-  return userSyncObjects;
+function resolveTtl(bidRequest) {
+  const withinBounds = (value) =>
+    isNumber(value) && value > 0 && value < 3000 ? value : DEFAULT_TTL;
+  const globalTtl = readConfig('ttl');
+  return globalTtl ? withinBounds(globalTtl) : withinBounds(bidRequest?.params?.ttl);
 }
 
-function isSecure(bid) {
-  return deepAccess(bid, 'params.bidOverride.imp.secure') ?? deepAccess(bid, 'ortb2Imp.secure') ?? 1;
-};
-
-function getMediaType(bid) {
-  return deepAccess(bid, 'mediaTypes.banner') ? BANNER : false;
+// When every bid in a request shares a single media type, pass it through the
+// converter context so price-floor lookups (and imp generation) are scoped to
+// that media type instead of the '*' wildcard.
+function soleMediaType(bidRequests) {
+  const types = new Set();
+  bidRequests.forEach((bid) => {
+    Object.keys(bid.mediaTypes || {}).forEach((type) => types.add(type));
+  });
+  return types.size === 1 ? types.values().next().value : undefined;
 }
 
-function validateAppendObject(validationFunction, allowedKeys, inputObject, appendToObject) {
-  const outputObject = {
-    ...appendToObject
-  };
-  if (allowedKeys.length > 0 && typeof validationFunction === 'function') {
-    for (const objectKey in inputObject) {
-      if (allowedKeys.indexOf(objectKey) !== -1 && validationFunction(inputObject[objectKey])) {
-        outputObject[objectKey] = inputObject[objectKey]
-      }
+// The SSP omits ORTB "mtype" on some passback responses; infer the media type
+// from the markup and, failing that, from the matched impression, so the converter
+// can build the proper bid-response shape.
+function resolveResponseMediaType(bid, imp) {
+  if (isStr(bid.adm)) {
+    const markup = bid.adm.trim();
+    if (markup.startsWith('{') || markup.startsWith('[')) {
+      return NATIVE;
+    }
+    if (/<vast/i.test(markup)) {
+      return VIDEO;
     }
   }
-  return outputObject;
-};
+  // No usable markup (e.g. VAST delivered via nurl): fall back to the impression.
+  if (imp?.video && (bid.nurl || !imp.banner)) {
+    return VIDEO;
+  }
+  if (imp?.native && !imp.banner && !imp.video) {
+    return NATIVE;
+  }
+  return BANNER;
+}
 
-function getTtl(bidderRequest) {
-  const ttl = config.getConfig('adtrgtme.ttl');
-  const validateTTL = (ttl) => {
-    return (isNumber(ttl) && ttl > 0 && ttl < 3600) ? ttl : DEFAULT_BID_TTL
-  };
-  return ttl ? validateTTL(ttl) : validateTTL(deepAccess(bidderRequest, 'params.ttl'));
-};
+const converter = ortbConverter({
+  context: {
+    netRevenue: true,
+    ttl: DEFAULT_TTL,
+    currency: DEFAULT_CUR,
+  },
 
-function getFloorModuleData(bid) {
-  const getFloorRequestObject = {
-    currency: deepAccess(bid, 'params.bidOverride.cur') || DEFAULT_CURRENCY,
-    mediaType: BANNER,
-    size: '*'
-  };
-  return (isFn(bid.getFloor)) ? bid.getFloor(getFloorRequestObject) : false;
-};
+  imp(buildImp, bidRequest, context) {
+    const imp = buildImp(bidRequest, context);
+    const params = bidRequest.params || {};
 
-function generateOpenRtbObject(bidderRequest, bid) {
-  if (bidderRequest) {
-    let outBoundBidRequest = {
-      id: generateUUID(),
-      cur: [getFloorModuleData(bidderRequest).currency || deepAccess(bid, 'params.bidOverride.cur') || DEFAULT_CURRENCY],
-      imp: [],
-      site: {
-        page: deepAccess(bidderRequest, 'refererInfo.page')
-      },
-      device: {
-        dnt: 0,
-        ua: navigator.userAgent,
-        ip: deepAccess(bid, 'params.bidOverride.device.ip') || deepAccess(bid, 'params.ext.ip') || undefined
-      },
-      regs: {
-        ext: {
-          'us_privacy': bidderRequest.uspConsent ? bidderRequest.uspConsent : '',
-          gdpr: bidderRequest.gdprConsent && bidderRequest.gdprConsent.gdprApplies ? 1 : 0
-        }
-      },
-      source: {
-        ext: {
-          hb: 1,
-          adapterver: ADAPTER_VERSION,
-          prebidver: PREBID_VERSION,
-          integration: {
-            name: INTEGRATION_METHOD,
-            ver: PREBID_VERSION
-          }
-        },
-        fd: 1
-      },
-      user: {
-        ext: {
-          consent: bidderRequest.gdprConsent && bidderRequest.gdprConsent.gdprApplies
-            ? bidderRequest.gdprConsent.consentString : ''
-        }
-      }
-    };
-
-    outBoundBidRequest.site.id = bid.params.sid;
-
-    if (bidderRequest.ortb2) {
-      outBoundBidRequest = appendFirstPartyData(outBoundBidRequest, bid);
-    };
-
-    if (deepAccess(bid, 'schain')) {
-      outBoundBidRequest.source.ext.schain = bid.schain;
-      outBoundBidRequest.source.ext.schain.nodes[0].rid = outBoundBidRequest.id;
-    };
-
-    return outBoundBidRequest;
-  };
-};
-
-function appendImpObject(bid, openRtbObject) {
-  const mediaTypeMode = getMediaType(bid);
-
-  if (openRtbObject && bid) {
-    const impObject = {
-      id: bid.bidId,
-      secure: isSecure(bid),
-      bidfloor: getFloorModuleData(bid).floor || deepAccess(bid, 'params.bidOverride.imp.bidfloor') || 0.000001
-    };
-
-    if (mediaTypeMode === BANNER) {
-      impObject.banner = {
-        mimes: bid.mediaTypes.banner.mimes || ['text/html', 'text/javascript', 'application/javascript', 'image/jpg'],
-        format: transformSizes(bid.sizes)
-      };
-      if (bid.mediaTypes.banner.pos) {
-        impObject.banner.pos = bid.mediaTypes.banner.pos;
-      };
-    };
-
-    impObject.ext = {
-      dfp_ad_unit_code: bid.adUnitCode
-    };
-
-    if (deepAccess(bid, 'params.zid')) {
-      impObject.tagid = bid.params.zid;
+    if (imp.banner && !imp.banner.mimes) {
+      imp.banner.mimes = DEFAULT_BANNER_MIMES;
     }
 
-    if (deepAccess(bid, 'ortb2Imp.ext.data') && isPlainObject(bid.ortb2Imp.ext.data)) {
-      impObject.ext.data = bid.ortb2Imp.ext.data;
-    };
+    deepSetValue(imp, 'ext.dfp_ad_unit_code', bidRequest.adUnitCode);
 
-    if (deepAccess(bid, 'ortb2Imp.instl') && isNumber(bid.ortb2Imp.instl) && (bid.ortb2Imp.instl === 1)) {
-      impObject.instl = bid.ortb2Imp.instl;
-    };
+    const { zid } = params;
+    if (zid != null && zid !== '') {
+      imp.tagid = String(zid);
+    }
 
-    openRtbObject.imp.push(impObject);
-  };
-};
+    const impOverride = params.bidOverride?.imp;
+    if (impOverride?.bidfloor != null) {
+      imp.bidfloor = impOverride.bidfloor;
+    }
+    if (impOverride?.bidfloorcur != null) {
+      imp.bidfloorcur = impOverride.bidfloorcur;
+    }
 
-function appendFirstPartyData(outBoundBidRequest, bid) {
-  const ortb2Object = bid.ortb2;
-  const siteObject = deepAccess(ortb2Object, 'site') || undefined;
-  const siteContentObject = deepAccess(siteObject, 'content') || undefined;
-  const userObject = deepAccess(ortb2Object, 'user') || undefined;
+    // share the resolved ttl with the matching bid-response via `context`
+    context.ttl = resolveTtl(bidRequest);
+    return imp;
+  },
 
-  if (siteObject && isPlainObject(siteObject)) {
-    const allowedSiteStringKeys = ['name', 'domain', 'page', 'ref', 'keywords'];
-    const allowedSiteArrayKeys = ['cat', 'sectioncat', 'pagecat'];
-    const allowedSiteObjectKeys = ['ext'];
-    outBoundBidRequest.site = validateAppendObject(isStr, allowedSiteStringKeys, siteObject, outBoundBidRequest.site);
-    outBoundBidRequest.site = validateAppendObject(isArray, allowedSiteArrayKeys, siteObject, outBoundBidRequest.site);
-    outBoundBidRequest.site = validateAppendObject(isPlainObject, allowedSiteObjectKeys, siteObject, outBoundBidRequest.site);
-  };
+  request(buildRequest, imps, bidderRequest, context) {
+    const request = buildRequest(imps, bidderRequest, context);
+    const bid = context.bidRequests?.[0] || bidderRequest.bids?.[0] || {};
+    const params = bid.params || {};
 
-  if (siteContentObject && isPlainObject(siteContentObject)) {
-    const allowedContentStringKeys = ['id', 'title', 'language'];
-    const allowedContentArrayKeys = ['cat'];
-    outBoundBidRequest.site.content = validateAppendObject(isStr, allowedContentStringKeys, siteContentObject, outBoundBidRequest.site.content);
-    outBoundBidRequest.site.content = validateAppendObject(isArray, allowedContentArrayKeys, siteContentObject, outBoundBidRequest.site.content);
-  };
+    // The converter's one-client processor has already selected the client
+    // section (site/app/dooh) from ortb2; write sid into that section so app/dooh
+    // requests don't end up with an invalid extra `site` object.
+    const clientSection = request.app ? 'app' : request.dooh ? 'dooh' : 'site';
+    deepSetValue(request, `${clientSection}.id`, String(params.sid));
+    if (
+      clientSection === 'site' &&
+      !request.site.page &&
+      bidderRequest.refererInfo?.page
+    ) {
+      request.site.page = bidderRequest.refererInfo.page;
+    }
 
-  if (userObject && isPlainObject(userObject)) {
-    const allowedUserStrings = ['id', 'buyeruid', 'gender', 'keywords', 'customdata'];
-    const allowedUserObjects = ['ext'];
-    outBoundBidRequest.user = validateAppendObject(isStr, allowedUserStrings, userObject, outBoundBidRequest.user);
-    outBoundBidRequest.user.ext = validateAppendObject(isPlainObject, allowedUserObjects, userObject, outBoundBidRequest.user.ext);
-  };
+    if (!isPlainObject(request.device)) {
+      request.device = {};
+    }
 
-  return outBoundBidRequest;
-};
+    // request currency follows the impression floor currency (price floors module
+    // or the manual bidfloor override), defaulting to USD.
+    const floorCur = imps.find((imp) => imp.bidfloorcur)?.bidfloorcur;
+    request.cur = [floorCur || DEFAULT_CUR];
 
-function generateServerRequest({payload, requestOptions, bidderRequest}) {
+    const gdprApplies = bidderRequest.gdprConsent?.gdprApplies ? 1 : 0;
+    deepSetValue(request, 'regs.gdpr', gdprApplies);
+    deepSetValue(request, 'regs.us_privacy', bidderRequest.uspConsent || '');
+    const gpp = bidderRequest.gppConsent?.gppString;
+    if (gpp) {
+      deepSetValue(request, 'regs.gpp', gpp);
+      deepSetValue(request, 'regs.gpp_sid', bidderRequest.gppConsent.applicableSections || []);
+    }
+    deepSetValue(
+      request,
+      'user.consent',
+      gdprApplies ? bidderRequest.gdprConsent?.consentString || '' : ''
+    );
+
+    deepSetValue(request, 'source.ext', {
+      hb: 1,
+      bidderver: BIDDER_VERSION,
+      prebidjsver: PREBIDJS_VERSION,
+    });
+    request.source.fd = 1;
+
+    const schain = bid.ortb2?.source?.ext?.schain;
+    if (schain && isArray(schain.nodes) && schain.nodes.length) {
+      request.source.schain = schain;
+      schain.nodes[0].rid = request.id;
+    }
+
+    return request;
+  },
+
+  bidResponse(buildBidResponse, bid, context) {
+    if (bid.mtype == null) {
+      context.mediaType = resolveResponseMediaType(bid, context.imp);
+    }
+    const bidResponse = buildBidResponse(bid, context);
+    bidResponse.adId = bid.adId || bid.impid || bid.crid;
+    // Keep the currency the converter derived from the top-level response `cur`;
+    // only a non-standard per-bid `cur` (legacy Adtarget responses) overrides it.
+    if (bid.cur) {
+      bidResponse.currency = bid.cur;
+    }
+    if (isPlainObject(bidResponse.meta)) {
+      bidResponse.meta.mediaType = bidResponse.mediaType;
+    }
+    return bidResponse;
+  },
+});
+
+function buildServerRequest(data, options, bidderRequest) {
   return {
-    url: (config.getConfig('adtrgtme.endpoint') || ENDPOINT) + (payload.site.id || ''),
+    url: `${readConfig('endpoint') || BIDDER_URL}${
+      data.site?.id || data.app?.id || data.dooh?.id || ''
+    }`,
     method: 'POST',
-    data: payload,
-    options: requestOptions,
-    bidderRequest: bidderRequest
+    data,
+    options,
+    bidderRequest,
   };
-};
+}
 
 export const spec = {
   code: BIDDER_CODE,
   aliases: [],
-  supportedMediaTypes: [BANNER],
+  supportedMediaTypes: [BANNER, VIDEO, NATIVE],
 
-  isBidRequestValid: function(bid) {
+  isBidRequestValid: function (bid) {
     const params = bid.params;
-    if (isPlainObject(params) && isNumber(params.sid)) {
+    if (
+      isPlainObject(params) &&
+      isStr(params.sid) &&
+      !isEmpty(params.sid) &&
+      params.sid.length > 0 &&
+      (isEmpty(params.zid) ||
+        isNumber(params.zid) ||
+        (isStr(params.zid) && !isNaN(parseInt(params.zid))))
+    ) {
       return true;
-    } else {
-      logWarn('Adtrgtme bidder params missing or incorrect');
-      return false;
     }
+    logWarn('Adtrgtme request invalid');
+    return false;
   },
 
-  buildRequests: function(validBidRequests, bidderRequest) {
-    if (isEmpty(validBidRequests) || isEmpty(bidderRequest)) {
+  buildRequests: function (bidRequests, bidderRequest) {
+    if (isEmpty(bidRequests) || isEmpty(bidderRequest)) {
       logWarn('Adtrgtme Adapter: buildRequests called with empty request');
       return undefined;
-    };
+    }
 
-    const requestOptions = {
+    const options = {
       contentType: 'application/json',
-      customHeaders: {
-        'x-openrtb-version': '2.5'
-      }
+      withCredentials: hasPurpose1Consent(bidderRequest.gdprConsent),
     };
 
-    requestOptions.withCredentials = hasPurpose1Consent(bidderRequest.gdprConsent);
-
-    if (config.getConfig('adtrgtme.singleRequestMode') === true) {
-      const payload = generateOpenRtbObject(bidderRequest, validBidRequests[0]);
-      validBidRequests.forEach(bid => {
-        appendImpObject(bid, payload);
+    if (readConfig('singleRequestMode') === true) {
+      const mediaType = soleMediaType(bidRequests);
+      const data = converter.toORTB({
+        bidRequests,
+        bidderRequest,
+        context: mediaType ? { mediaType } : {},
       });
-
-      return generateServerRequest({payload, requestOptions, bidderRequest});
+      return buildServerRequest(data, options, bidderRequest);
     }
 
-    return validBidRequests.map(bid => {
-      const payloadClone = generateOpenRtbObject(bidderRequest, bid);
-      appendImpObject(bid, payloadClone);
-
-      return generateServerRequest({payload: payloadClone, requestOptions, bidderRequest: bid});
+    return bidRequests.map((bid) => {
+      const mediaType = soleMediaType([bid]);
+      const data = converter.toORTB({
+        bidRequests: [bid],
+        bidderRequest,
+        context: mediaType ? { mediaType } : {},
+      });
+      return buildServerRequest(data, options, bid);
     });
   },
 
-  interpretResponse: function(serverResponse, { data, bidderRequest }) {
-    const response = [];
-    if (!serverResponse.body || !Array.isArray(serverResponse.body.seatbid)) {
-      return response;
+  interpretResponse: function (serverResponse, request) {
+    if (!serverResponse?.body || !Array.isArray(serverResponse.body.seatbid)) {
+      return [];
+    }
+    try {
+      return converter.fromORTB({
+        response: serverResponse.body,
+        request: request.data,
+      }).bids;
+    } catch (e) {
+      logWarn('Adtrgtme: unable to interpret bid-response', e);
+      return [];
+    }
+  },
+
+  getUserSyncs: function (options, res, gdprConsent, uspConsent, gppConsent) {
+    const syncs = [];
+    if (!options.pixelEnabled && !options.iframeEnabled) {
+      return syncs;
     }
 
-    let seatbids = serverResponse.body.seatbid;
-    seatbids.forEach(seatbid => {
-      let bid;
-
-      try {
-        bid = seatbid.bid[0];
-      } catch (e) {
-        return response;
+    const addConsentParams = (url) => {
+      if (gdprConsent) {
+        url += `&gdpr=${gdprConsent.gdprApplies ? 1 : 0}&gdpr_consent=${
+          encodeURIComponent(gdprConsent.consentString) || ''
+        }`;
       }
+      if (uspConsent) {
+        url += `&us_privacy=${encodeURIComponent(uspConsent)}`;
+      }
+      if (gppConsent?.gppString && gppConsent?.applicableSections?.length) {
+        url += `&gpp=${encodeURIComponent(
+          gppConsent.gppString
+        )}&gpp_sid=${encodeURIComponent(gppConsent.applicableSections.join(','))}`;
+      }
+      return url;
+    };
 
-      let cpm = bid.price;
-
-      let bidResponse = {
-        adId: deepAccess(bid, 'adId') ? bid.adId : bid.impid || bid.crid,
-        ad: bid.adm,
-        adUnitCode: bidderRequest.adUnitCode,
-        requestId: bid.impid,
-        cpm: cpm,
-        width: bid.w,
-        height: bid.h,
-        creativeId: bid.crid || 0,
-        currency: bid.cur || DEFAULT_CURRENCY,
-        dealId: bid.dealid ? bid.dealid : null,
-        netRevenue: true,
-        ttl: getTtl(bidderRequest),
-        mediaType: BANNER,
-        meta: {
-          advertiserDomains: bid.adomain,
-          mediaType: BANNER,
+    if (isArray(res)) {
+      res.forEach((response) => {
+        const pixels = response.body?.ext?.pixels;
+        if (isArray(pixels)) {
+          pixels.forEach(([stype, url]) => {
+            const type = String(stype).toLowerCase();
+            if (
+              isStr(url) &&
+              url.startsWith('http') &&
+              (((type === 'image' || type === 'img') && options.pixelEnabled) ||
+                (type === 'iframe' && options.iframeEnabled))
+            ) {
+              syncs.push({ type, url: addConsentParams(url) });
+            }
+          });
         }
-      };
-
-      response.push(bidResponse);
-    });
-
-    return response;
-  },
-
-  getUserSyncs: function(syncOptions, serverResponses, gdprConsent = {}, uspConsent = '') {
-    const bidResponse = !isEmpty(serverResponses) && serverResponses[0].body;
-    if (bidResponse && bidResponse.ext && bidResponse.ext.pixels) {
-      return extractUserSyncUrls(syncOptions, bidResponse.ext.pixels);
+      });
     }
-    return [];
-  }
+
+    return syncs;
+  },
 };
 
 registerBidder(spec);

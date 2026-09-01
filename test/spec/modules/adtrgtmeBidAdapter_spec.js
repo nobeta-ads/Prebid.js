@@ -1,802 +1,659 @@
 import { expect } from 'chai';
 import { config } from 'src/config.js';
-import { BANNER } from 'src/mediaTypes.js';
 import { spec } from 'modules/adtrgtmeBidAdapter.js';
+import 'modules/priceFloors.js';
 
-const DEFAULT_SID = 1220291391;
-const DEFAULT_ZID = 1836455615;
+const DEFAULT_SID = '1220291391';
 const DEFAULT_BID_ID = '84ab500420319d';
+const DEFAULT_PIXEL_URL = 'https://cdn.adtarget.me/libs/1x1.gif';
+const DEFAULT_BANNER_URL = 'https://cdn.adtarget.me/libs/banner/300x250.jpg';
+const BIDDER_VERSION = '1.0.8';
+const PREBIDJS_VERSION = '$prebid.version$';
 
-const DEFAULT_AD_UNIT_CODE = '/1220291391/header-banner';
-const DEFAULT_AD_UNIT_TYPE = BANNER;
-const DEFAULT_PARAMS_BID_OVERRIDE = {};
-
-const ADAPTER_VERSION = '1.0.0';
-const PREBID_VERSION = '$prebid.version$';
-const INTEGRATION_METHOD = 'prebid.js';
-
-// Utility functions
-const generateBidRequest = ({bidId, adUnitCode, bidOverrideObject, zid, ortb2}) => {
+const createBidRequest = ({ bidId, adUnitCode, bidOverride, zid, ortb2, mediaTypes } = {}) => {
   const bidRequest = {
-    adUnitCode,
-    auctionId: 'b06c5141-fe8f-4cdf-9d7d-54415490a917',
-    bidId,
-    bidderRequestsCount: 1,
+    auctionId: 'f3c594t-3o0ch1b0rm-ayn93c3o0ch1b0rm',
+    adUnitCode: adUnitCode || '/1220291391/banner',
+    bidId: bidId || DEFAULT_BID_ID,
     bidder: 'adtrgtme',
-    bidderRequestId: '7101db09af0db2',
-    bidderWinsCount: 0,
-    mediaTypes: {},
+    mediaTypes: mediaTypes || { banner: { sizes: [[300, 250]] } },
+    sizes: [[300, 250]],
     params: {
-      bidOverride: bidOverrideObject
+      sid: DEFAULT_SID,
+      bidOverride: bidOverride || {},
     },
-    src: 'client',
     transactionId: '5b17b67d-7704-4732-8cc9-5b1723e9bcf9',
-    ortb2
+    ortb2: ortb2 || {},
   };
 
-  const bannerObj = {
-    sizes: [[300, 250]]
-  };
-
-  bidRequest.mediaTypes.banner = bannerObj;
-  bidRequest.sizes = [[300, 250]];
-
-  bidRequest.params.sid = DEFAULT_SID;
-  if (typeof zid == 'number') {
+  if (typeof zid === 'string') {
     bidRequest.params.zid = zid;
   }
-
   return bidRequest;
-}
-
-let generateBidderRequest = (bidRequestArray, adUnitCode, ortb2 = {}) => {
-  const bidderRequest = {
-    adUnitCode: adUnitCode || 'default-adUnitCode',
-    auctionId: 'd4c83a3b-18e4-4208-b98b-63848449c7aa',
-    auctionStart: new Date().getTime(),
-    bidderCode: 'adtrgtme',
-    bidderRequestId: '112f1c7c5d399a',
-    bids: bidRequestArray,
-    refererInfo: {
-      page: 'https://publisher-test.com',
-      reachedTop: true,
-      isAmp: false,
-      numIframes: 0,
-      stack: ['https://publisher-test.com'],
-    },
-    gdprConsent: {
-      consentString: 'BOtmiBKOtmiBKABABAENAFAAAAACeAAA',
-      vendorData: {},
-      gdprApplies: true
-    },
-    start: new Date().getTime(),
-    timeout: 1000,
-    ortb2
-  };
-
-  return bidderRequest;
 };
 
-const generateBuildRequestMock = ({bidId, adUnitCode, adUnitType, zid, bidOverrideObject, pubIdMode, ortb2}) => {
-  const bidRequestConfig = {
-    bidId: bidId || DEFAULT_BID_ID,
-    adUnitCode: adUnitCode || DEFAULT_AD_UNIT_CODE,
-    adUnitType: adUnitType || DEFAULT_AD_UNIT_TYPE,
-    zid: zid || DEFAULT_ZID,
-    bidOverrideObject: bidOverrideObject || DEFAULT_PARAMS_BID_OVERRIDE,
+const createBidderRequest = (bids, ortb2 = {}) => ({
+  adUnitCode: '/1220291391/banner',
+  auctionId: 'd4c83a3b-18e4-4208-b98b-63848449c7aa',
+  bidderCode: 'adtrgtme',
+  bids,
+  refererInfo: {
+    page: 'https://partner-site.com',
+    stack: ['https://partner-site.com'],
+  },
+  gdprConsent: {
+    consentString: 'BOtmiBKOtmiBKABABAENAFAAAAACeAAA',
+    vendorData: {},
+    gdprApplies: true,
+  },
+  timeout: 1000,
+  ortb2,
+});
 
-    pubIdMode: pubIdMode || false,
-    ortb2: ortb2 || {}
-  };
-  const bidRequest = generateBidRequest(bidRequestConfig);
-  const validBidRequests = [bidRequest];
-  const bidderRequest = generateBidderRequest(validBidRequests, adUnitCode, ortb2);
-
-  return { bidRequest, validBidRequests, bidderRequest }
+const createRequestMock = (opts = {}) => {
+  const bidRequest = createBidRequest(opts);
+  const validBR = [bidRequest];
+  const bidderRequest = createBidderRequest(validBR, opts.ortb2 || {});
+  return { bidRequest, validBR, bidderRequest };
 };
 
-const generateAdmPayload = (admPayloadType) => {
-  let ADM_PAYLOAD;
-  switch (admPayloadType) {
-    case 'banner':
-      ADM_PAYLOAD = '<script>logInfo(\'ad\'); AdPlacement </script>'; // banner
-      break;
-    default: '<script>logInfo(\'ad\'); AdPlacement </script>'; break;
-  };
+// builds the request and returns the first server-request object (multi-request mode)
+const buildFirst = (validBR, bidderRequest) => spec.buildRequests(validBR, bidderRequest)[0];
 
-  return ADM_PAYLOAD;
-};
+const createSeatBid = (overrides = {}) => ({
+  id: '5qtvluj7bk6jhzmqwu4zzulv',
+  impid: DEFAULT_BID_ID,
+  price: 1,
+  w: 300,
+  h: 250,
+  crid: 'creativeid',
+  mtype: 1,
+  adomain: ['some-advertiser-domain.com'],
+  ...overrides,
+});
 
-const generateResponseMock = (admPayloadType) => {
-  const bidResponse = {
-    id: 'fc0c35df-21fb-4f93-9ebd-88759dbe31f9',
-    impid: '274395c06a24e5',
-    adm: generateAdmPayload(admPayloadType),
-    price: 1,
-    w: 300,
-    h: 250,
-    crid: 'ssp-placement-name',
-    adomain: ['advertiser-domain.com']
-  };
+const createServerResponse = (bid) => ({
+  body: {
+    id: '5qtvluj7bk6jhzmqwu4zzulv',
+    cur: 'USD',
+    seatbid: [{ bid: [bid], seat: 12345 }],
+  },
+});
 
-  const serverResponse = {
-    body: {
-      id: 'fc0c35df-21fb-4f93-9ebd-88759dbe31f9',
-      seatbid: [{ bid: [ bidResponse ], seat: 13107 }]
-    }
-  };
-  const { validBidRequests, bidderRequest } = generateBuildRequestMock({adUnitType: admPayloadType});
-  const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-
-  return {serverResponse, data, bidderRequest};
-}
-
-// Unit tests
-describe('adtrgtme Bid Adapter:', () => {
-  it('PLACEHOLDER TO PASS GULP', () => {
-    const obj = {};
-    expect(obj).to.be.an('object');
+describe('Adtrgtme Bid Adapter:', () => {
+  afterEach(() => {
+    config.resetConfig();
   });
 
-  describe('Validate basic properties', () => {
-    it('should define the correct bidder code', () => {
-      expect(spec.code).to.equal('adtrgtme')
+  describe('check basic properties', () => {
+    it('should define bidder code', () => {
+      expect(spec.code).to.equal('adtrgtme');
+    });
+    it('should support banner, video and native', () => {
+      expect(spec.supportedMediaTypes).to.deep.equal(['banner', 'video', 'native']);
     });
   });
 
-  describe('getUserSyncs()', () => {
-    const IMAGE_PIXEL_URL = 'http://image-pixel.com/foo/bar?1234&baz=true';
-    const IFRAME_ONE_URL = 'http://image-iframe.com/foo/bar?1234&baz=true';
-    const IFRAME_TWO_URL = 'http://image-iframe-two.com/foo/bar?1234&baz=true';
-
-    let serverResponses = [];
-    beforeEach(() => {
-      serverResponses[0] = {
-        body: {
-          ext: {
-            pixels: `<script>document.write('<iframe src="${IFRAME_ONE_URL}"></iframe>` +
-                    `<img src="${IMAGE_PIXEL_URL}"></iframe>` +
-                    `<iframe src="${IFRAME_TWO_URL}"></iframe>');</script>`
-          }
-        }
-      }
-    });
-
-    after(() => {
-      serverResponses = undefined;
-    });
-
-    it('for only iframe enabled syncs', () => {
-      let syncOptions = {
-        iframeEnabled: true,
-        pixelEnabled: false
-      };
-      let pixelsObjects = spec.getUserSyncs(syncOptions, serverResponses);
-      expect(pixelsObjects.length).to.equal(2);
-      expect(pixelsObjects).to.deep.equal(
-        [
-          {type: 'iframe', 'url': IFRAME_ONE_URL},
-          {type: 'iframe', 'url': IFRAME_TWO_URL}
-        ]
-      )
-    });
-
-    it('for only pixel enabled syncs', () => {
-      let syncOptions = {
-        iframeEnabled: false,
-        pixelEnabled: true
-      };
-      let pixelsObjects = spec.getUserSyncs(syncOptions, serverResponses);
-      expect(pixelsObjects.length).to.equal(1);
-      expect(pixelsObjects).to.deep.equal(
-        [
-          {type: 'image', 'url': IMAGE_PIXEL_URL}
-        ]
-      )
-    });
-
-    it('for both pixel and iframe enabled syncs', () => {
-      let syncOptions = {
-        iframeEnabled: true,
-        pixelEnabled: true
-      };
-      let pixelsObjects = spec.getUserSyncs(syncOptions, serverResponses);
-      expect(pixelsObjects.length).to.equal(3);
-      expect(pixelsObjects).to.deep.equal(
-        [
-          {type: 'iframe', 'url': IFRAME_ONE_URL},
-          {type: 'image', 'url': IMAGE_PIXEL_URL},
-          {type: 'iframe', 'url': IFRAME_TWO_URL}
-        ]
-      )
-    });
-  });
-
-  // Validate Bid Requests
-  describe('isBidRequestValid()', () => {
-    const INVALID_INPUT = [
+  describe('isBidRequestValid', () => {
+    const BAD_VALUE = [
       {},
-      {params: {}},
-      {params: {sid: '1234', zid: '4321'}},
-      {params: {sid: '1220291391', zid: 4321}},
-      {params: {zid: ''}},
-      {params: {sid: '', zid: ''}},
+      { params: {} },
+      { params: { sid: 1220291391, zid: '1836455615' } },
+      { params: { sid: '1220291391', zid: 'A' } },
+      { params: { sid: '', zid: '1836455615' } },
+      { params: { sid: '', zid: 'A' } },
+      { params: { zid: '' } },
     ];
-
-    INVALID_INPUT.forEach(input => {
-      it(`should determine that the bid is INVALID for the input ${JSON.stringify(input)}`, () => {
-        expect(spec.isBidRequestValid(input)).to.be.false;
+    BAD_VALUE.forEach((value) => {
+      it(`should determine bad bid for ${JSON.stringify(value)}`, () => {
+        expect(spec.isBidRequestValid(value)).to.be.false;
       });
     });
 
-    it('should determine that the bid is VALID if sid and zid are present on the params object', () => {
-      const validBid = {
-        params: {
-          sid: 1220291391,
-          zid: 1836455615
-        }
-      };
-      expect(spec.isBidRequestValid(validBid)).to.be.true;
-    });
-  });
-
-  describe('Price Floor module support:', () => {
-    it('should get bidfloor from getFloor method', () => {
-      const { bidRequest, validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      bidRequest.params.bidOverride = {cur: 'EUR'};
-      bidRequest.getFloor = (floorObj) => {
-        return {
-          floor: bidRequest.floors.values[floorObj.mediaType + '|300x250'],
-          currency: floorObj.currency,
-          mediaType: floorObj.mediaType
-        }
-      };
-      bidRequest.floors = {
-        currency: 'EUR',
-        values: {
-          'banner|300x250': 5.55
-        }
-      };
-      const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-      expect(data.cur).to.deep.equal(['EUR']);
-      expect(data.imp[0].bidfloor).is.a('number');
-      expect(data.imp[0].bidfloor).to.equal(5.55);
-    });
-  });
-
-  describe('Schain module support:', () => {
-    it('should send Global or Bidder specific schain', function () {
-      const { bidRequest, validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      const globalSchain = {
-        ver: '1.0',
-        complete: 1,
-        nodes: [{
-          asi: 'some-platform.com',
-          sid: '111111',
-          rid: bidRequest.bidId,
-          hp: 1
-        }]
-      };
-      bidRequest.schain = globalSchain;
-      const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-      const schain = data.source.ext.schain;
-      expect(schain.nodes.length).to.equal(1);
-      expect(schain).to.equal(globalSchain);
-    });
-  });
-
-  describe('First party data module - "Site" support (ortb2):', () => {
-    // Should not allow invalid "site" data types
-    const INVALID_ORTB2_TYPES = [ null, [], 123, 'unsupportedKeyName', true, false, undefined ];
-    INVALID_ORTB2_TYPES.forEach(param => {
-      it(`should not allow invalid site types to be added to bid-request: ${JSON.stringify(param)}`, () => {
-        const ortb2 = { site: param }
-        const { validBidRequests, bidderRequest } = generateBuildRequestMock({ortb2});
-        const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-        expect(data.site[param]).to.be.undefined;
-      });
-    });
-
-    // Should add valid "site" params
-    const VALID_SITE_STRINGS = ['name', 'domain', 'page', 'ref', 'keywords'];
-    const VALID_SITE_ARRAYS = ['cat', 'sectioncat', 'pagecat'];
-
-    VALID_SITE_STRINGS.forEach(param => {
-      it(`should allow supported site keys to be added bid-request: ${JSON.stringify(param)}`, () => {
-        const ortb2 = {
-          site: {
-            [param]: 'something'
-          }
-        };
-        const { validBidRequests, bidderRequest } = generateBuildRequestMock({ortb2});
-        const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-        expect(data.site[param]).to.exist;
-        expect(data.site[param]).to.be.a('string');
-        expect(data.site[param]).to.be.equal(ortb2.site[param]);
-      });
-    });
-
-    VALID_SITE_ARRAYS.forEach(param => {
-      it(`should determine that the ortb2.site Array key is valid and append to the bid-request: ${JSON.stringify(param)}`, () => {
-        const ortb2 = {
-          site: {
-            [param]: ['something']
-          }
-        };
-        const { validBidRequests, bidderRequest } = generateBuildRequestMock({ortb2});
-        const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-        expect(data.site[param]).to.exist;
-        expect(data.site[param]).to.be.a('array');
-        expect(data.site[param]).to.be.equal(ortb2.site[param]);
-      });
-    });
-
-    // Should not allow invalid "site.content" data types
-    INVALID_ORTB2_TYPES.forEach(param => {
-      it(`should determine that the ortb2.site.content key is invalid and should not be added to bid-request: ${JSON.stringify(param)}`, () => {
-        const ortb2 = {
-          site: {
-            content: param
-          }
-        };
-        const { validBidRequests, bidderRequest } = generateBuildRequestMock({ortb2});
-        const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-        expect(data.site.content).to.be.undefined;
-      });
-    });
-
-    // Should not allow invalid "site.content" keys
-    it(`should not allow invalid ortb2.site.content object keys to be added to bid-request: {custom object}`, () => {
-      const ortb2 = {
-        site: {
-          content: {
-            fake: 'news',
-            unreal: 'param',
-            counterfit: 'data'
-          }
-        }
-      };
-      const { validBidRequests, bidderRequest } = generateBuildRequestMock({ortb2});
-      const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-      expect(data.site.content).to.be.a('object');
-    });
-
-    // Should append valid "site.content" keys
-    const VALID_CONTENT_STRINGS = ['id', 'title', 'language'];
-    VALID_CONTENT_STRINGS.forEach(param => {
-      it(`should determine that the ortb2.site String key is valid and append to the bid-request: ${JSON.stringify(param)}`, () => {
-        const ortb2 = {
-          site: {
-            content: {
-              [param]: 'something'
-            }
-          }
-        };
-        const { validBidRequests, bidderRequest } = generateBuildRequestMock({ortb2});
-        const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-        expect(data.site.content[param]).to.exist;
-        expect(data.site.content[param]).to.be.a('string');
-        expect(data.site.content[param]).to.be.equal(ortb2.site.content[param]);
-      });
-    });
-
-    const VALID_CONTENT_ARRAYS = ['cat'];
-    VALID_CONTENT_ARRAYS.forEach(param => {
-      it(`should determine that the ortb2.site Array key is valid and append to the bid-request: ${JSON.stringify(param)}`, () => {
-        const ortb2 = {
-          site: {
-            content: {
-              [param]: ['something', 'something-else']
-            }
-          }
-        };
-        const { validBidRequests, bidderRequest } = generateBuildRequestMock({ortb2});
-        const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-        expect(data.site.content[param]).to.be.a('array');
-        expect(data.site.content[param]).to.be.equal(ortb2.site.content[param]);
+    const OK_VALUE = [
+      { params: { sid: '1220291391' } },
+      { params: { sid: '1220291391', zid: 1836455615 } },
+      { params: { sid: '1220291391', zid: '1836455615' } },
+      { params: { sid: '1220291391', zid: '1836455615A' } },
+    ];
+    OK_VALUE.forEach((value) => {
+      it(`should determine OK bid for ${JSON.stringify(value)}`, () => {
+        expect(spec.isBidRequestValid(value)).to.be.true;
       });
     });
   });
 
-  describe('First party data module - "User" support (ortb2):', () => {
-    // Global ortb2.user validations
-    // Should not allow invalid "user" data types
-    const INVALID_ORTB2_TYPES = [ null, [], 'unsupportedKeyName', true, false, undefined ];
-    INVALID_ORTB2_TYPES.forEach(param => {
-      it(`should not allow invalid site types to be added to bid-request: ${JSON.stringify(param)}`, () => {
-        const ortb2 = { user: param }
-        const { validBidRequests, bidderRequest } = generateBuildRequestMock({ortb2});
-        const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-        expect(data.user[param]).to.be.undefined;
+  describe('buildRequests - basics', () => {
+    it('should return undefined when no bids', () => {
+      expect(spec.buildRequests([])).to.be.undefined;
+    });
+
+    it('should return one server-request per bid', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      const requests = spec.buildRequests(validBR, bidderRequest);
+      expect(requests).to.be.an('array').with.lengthOf(1);
+      expect(requests[0].method).to.equal('POST');
+    });
+
+    it('should attach content-type and withCredentials when purpose-1 consent is granted', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      bidderRequest.gdprConsent.gdprApplies = false;
+      const { options } = buildFirst(validBR, bidderRequest);
+      expect(options).to.deep.equal({
+        contentType: 'application/json',
+        withCredentials: true,
       });
     });
 
-    // Should add valid "user" params
-    const VALID_USER_STRINGS = ['id', 'buyeruid', 'gender', 'keywords', 'customdata'];
-    VALID_USER_STRINGS.forEach(param => {
-      it(`should allow supported user string keys to be added bid-request: ${JSON.stringify(param)}`, () => {
-        const ortb2 = {
-          user: {
-            [param]: 'something'
-          }
-        };
-        const { validBidRequests, bidderRequest } = generateBuildRequestMock({ortb2});
-        const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-        expect(data.user[param]).to.exist;
-        expect(data.user[param]).to.be.a('string');
-        expect(data.user[param]).to.be.equal(ortb2.user[param]);
-      });
-    });
-
-    const VALID_USER_OBJECTS = ['ext'];
-    VALID_USER_OBJECTS.forEach(param => {
-      it(`should allow supported user extObject keys to be added to the bid-request: ${JSON.stringify(param)}`, () => {
-        const ortb2 = {
-          user: {
-            [param]: {a: '123', b: '456'}
-          }
-        };
-        const { validBidRequests, bidderRequest } = generateBuildRequestMock({ortb2});
-        const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-        expect(data.user[param]).to.exist;
-        expect(data.user[param]).to.be.a('object');
-        expect(data.user[param]).to.be.deep.include({[param]: {a: '123', b: '456'}});
-        config.setConfig({ortb2: {}});
-      });
-    });
-
-    // adUnit.ortb2Imp.ext.data
-    it(`should allow adUnit.ortb2Imp.ext.data object to be added to the bid-request`, () => {
-      let { validBidRequests, bidderRequest } = generateBuildRequestMock({})
-      validBidRequests[0].ortb2Imp = {
-        ext: {
-          data: {
-            pbadslot: 'homepage-top-rect',
-            adUnitSpecificAttribute: '123'
-          }
-        }
-      };
-      const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-      expect(data.imp[0].ext.data).to.deep.equal(validBidRequests[0].ortb2Imp.ext.data);
-    });
-    // adUnit.ortb2Imp.instl
-    it(`should allow adUnit.ortb2Imp.instl numeric boolean "1" to be added to the bid-request`, () => {
-      let { validBidRequests, bidderRequest } = generateBuildRequestMock({})
-      validBidRequests[0].ortb2Imp = {
-        instl: 1
-      };
-      const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-      expect(data.imp[0].instl).to.deep.equal(validBidRequests[0].ortb2Imp.instl);
-    });
-
-    it(`should prevent adUnit.ortb2Imp.instl boolean "true" to be added to the bid-request`, () => {
-      let { validBidRequests, bidderRequest } = generateBuildRequestMock({})
-      validBidRequests[0].ortb2Imp = {
-        instl: true
-      };
-      const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-      expect(data.imp[0].instl).to.not.exist;
-    });
-
-    it(`should prevent adUnit.ortb2Imp.instl boolean "false" to be added to the bid-request`, () => {
-      let { validBidRequests, bidderRequest } = generateBuildRequestMock({})
-      validBidRequests[0].ortb2Imp = {
-        instl: false
-      };
-      const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-      expect(data.imp[0].instl).to.not.exist;
-    });
-  });
-
-  describe('GDPR & Consent:', () => {
-    it('should return request objects that do not send cookies if purpose 1 consent is not provided', () => {
-      const { validBidRequests, bidderRequest } = generateBuildRequestMock({});
+    it('should not send cookies when purpose-1 consent is missing', () => {
+      const { validBR, bidderRequest } = createRequestMock();
       bidderRequest.gdprConsent = {
-        consentString: 'BOtmiBKOtmiBKABABAENAFAAAAACeAAA',
+        consentString: 'BOtmiBKO234234tmiBKABABAEN234AFAAAAACeAAA',
         apiVersion: 2,
-        vendorData: {
-          purpose: {
-            consents: {
-              '1': false
-            }
-          }
-        },
-        gdprApplies: true
+        vendorData: { purpose: { consents: { 1: false } } },
+        gdprApplies: true,
       };
-      const options = spec.buildRequests(validBidRequests, bidderRequest)[0].options;
+      const { options } = buildFirst(validBR, bidderRequest);
       expect(options.withCredentials).to.be.false;
     });
   });
 
-  describe('Endpoint & Impression Request Mode:', () => {
+  describe('Endpoint & singleRequestMode', () => {
+    it('should route request to default endpoint + sid', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      const { url, method } = buildFirst(validBR, bidderRequest);
+      expect(method).to.equal('POST');
+      expect(url).to.equal('https://rtb.cdn.adtarget.market/ssp?prebid&s=' + DEFAULT_SID);
+    });
+
     it('should route request to config override endpoint', () => {
-      const { validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      const sid = validBidRequests[0].params.sid;
-      const testOverrideEndpoint = 'http://new_bidder_host.com/ssp?s=';
-      config.setConfig({
-        adtrgtme: {
-          endpoint: testOverrideEndpoint
-        }
-      });
-      const response = spec.buildRequests(validBidRequests, bidderRequest)[0];
-      expect(response).to.deep.include(
-        {
-          method: 'POST',
-          url: testOverrideEndpoint + sid
-        });
+      const overrideEndpoint = 'http://partner-adserv-domain.com/ssp?s=';
+      config.setConfig({ adtrgtme: { endpoint: overrideEndpoint } });
+      const { validBR, bidderRequest } = createRequestMock();
+      const { url } = buildFirst(validBR, bidderRequest);
+      expect(url).to.equal(overrideEndpoint + DEFAULT_SID);
     });
 
-    it('should route request to endpoint + sid', () => {
-      config.setConfig({
-        adtrgtme: {}
-      });
-      const { validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      const sid = validBidRequests[0].params.sid;
-      const response = spec.buildRequests(validBidRequests, bidderRequest);
-      expect(response[0]).to.deep.include({
-        method: 'POST',
-        url: 'https://z.cdn.adtarget.market/ssp?prebid&s=' + sid
-      });
-    });
+    it('should return a single server-request with all imps in singleRequestMode', () => {
+      config.setConfig({ adtrgtme: { singleRequestMode: true } });
+      const a = createBidRequest({ bidId: DEFAULT_BID_ID, adUnitCode: '/1220291391/banner' });
+      const b = createBidRequest({ bidId: '6heos7ks8z0j', adUnitCode: 'bidder-code', zid: '98876543210' });
+      const validBR = [a, b];
+      const bidderRequest = createBidderRequest(validBR);
+      const request = spec.buildRequests(validBR, bidderRequest);
 
-    it('should return a single request object for single request mode', () => {
-      let { bidRequest, validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      const BID_ID_2 = '84ab50xxxxx';
-      const BID_ZID_2 = 98876543210;
-      const AD_UNIT_CODE_2 = 'test-ad-unit-code-123';
-      const { bidRequest: bidRequest2 } = generateBuildRequestMock({bidId: BID_ID_2, zid: BID_ZID_2, adUnitCode: AD_UNIT_CODE_2});
-      validBidRequests = [bidRequest, bidRequest2];
-      bidderRequest.bids = validBidRequests;
-
-      config.setConfig({
-        adtrgtme: {
-          singleRequestMode: true
-        }
-      });
-
-      const data = spec.buildRequests(validBidRequests, bidderRequest).data;
-
-      expect(data.imp).to.be.an('array').with.lengthOf(2);
-
-      expect(data.imp[0]).to.deep.include({
-        id: DEFAULT_BID_ID,
-        ext: {
-          dfp_ad_unit_code: DEFAULT_AD_UNIT_CODE
-        }
-      });
-
-      expect(data.imp[1]).to.deep.include({
-        id: BID_ID_2,
-        tagid: BID_ZID_2,
-        ext: {
-          dfp_ad_unit_code: AD_UNIT_CODE_2
-        }
-      });
+      expect(request.method).to.equal('POST');
+      expect(request.data.imp).to.be.an('array').with.lengthOf(2);
+      expect(request.data.imp[0]).to.deep.include({ id: DEFAULT_BID_ID });
+      expect(request.data.imp[0].ext).to.deep.include({ dfp_ad_unit_code: '/1220291391/banner' });
+      expect(request.data.imp[1]).to.deep.include({ id: '6heos7ks8z0j', tagid: '98876543210' });
+      expect(request.data.imp[1].ext).to.deep.include({ dfp_ad_unit_code: 'bidder-code' });
     });
   });
 
-  describe('Validate request filtering:', () => {
-    it('should not return request when no bids are present', function () {
-      let request = spec.buildRequests([]);
-      expect(request).to.be.undefined;
-    });
+  describe('oRTB request data', () => {
+    it('should build a valid base oRTB request', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      const { data } = buildFirst(validBR, bidderRequest);
 
-    it('buildRequests(): should return an array with the correct amount of request objects', () => {
-      const { validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      const response = spec.buildRequests(validBidRequests, bidderRequest).bidderRequest;
-      expect(response.bids).to.be.an('array').to.have.lengthOf(1);
-    });
-  });
-
-  describe('Request Headers validation:', () => {
-    it('should return request objects with the relevant custom headers and content type declaration', () => {
-      const { validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      bidderRequest.gdprConsent.gdprApplies = false;
-      const options = spec.buildRequests(validBidRequests, bidderRequest).options;
-      expect(options).to.deep.equal(
-        {
-          contentType: 'application/json',
-          customHeaders: {
-            'x-openrtb-version': '2.5'
-          },
-          withCredentials: true
-        });
-    });
-  });
-
-  describe('Request Payload oRTB bid validation:', () => {
-    it('should generate a valid openRTB bid-request object in the data field', () => {
-      const { validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      const data = spec.buildRequests(validBidRequests, bidderRequest).data;
       expect(data.site).to.deep.include({
-        id: bidderRequest.bids[0].params.sid,
-        page: bidderRequest.refererInfo.page
+        id: DEFAULT_SID,
+        page: bidderRequest.refererInfo.page,
       });
-
-      expect(data.device).to.deep.equal({
-        dnt: 0,
-        ua: navigator.userAgent,
-        ip: undefined
-      });
-
-      expect(data.regs).to.deep.equal({
-        ext: {
-          'us_privacy': '',
-          gdpr: 1
-        }
-      });
-
-      expect(data.source).to.deep.equal({
-        ext: {
-          hb: 1,
-          adapterver: ADAPTER_VERSION,
-          prebidver: PREBID_VERSION,
-          integration: {
-            name: INTEGRATION_METHOD,
-            ver: PREBID_VERSION
-          }
-        },
-        fd: 1
-      });
-
+      expect(data.device).to.be.an('object');
+      expect(data.device.dnt).to.be.undefined;
+      expect(data.regs).to.deep.equal({ us_privacy: '', gdpr: 1 });
       expect(data.cur).to.deep.equal(['USD']);
     });
 
-    it('should generate a valid openRTB imp.ext object in the bid-request', () => {
-      const { validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      const bid = validBidRequests[0];
-      const data = spec.buildRequests(validBidRequests, bidderRequest).data;
-      expect(data.imp[0].ext).to.deep.equal({
-        dfp_ad_unit_code: DEFAULT_AD_UNIT_CODE
+    it('should attach adapter identity to source.ext', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.source.ext).to.deep.equal({
+        hb: 1,
+        bidderver: BIDDER_VERSION,
+        prebidjsver: PREBIDJS_VERSION,
       });
+      expect(data.source.fd).to.equal(1);
     });
 
-    it('should use siteId value as site.id in the outbound bid-request when using "pubId" integration mode', () => {
-      let { validBidRequests, bidderRequest } = generateBuildRequestMock({pubIdMode: true});
-      validBidRequests[0].params.sid = 9876543210;
-      const data = spec.buildRequests(validBidRequests, bidderRequest).data;
-      expect(data.site.id).to.equal(9876543210);
+    it('should forward core-enriched ortb2.device fields (ua, sua, language)', () => {
+      const ortb2 = {
+        device: {
+          ua: 'core-enriched-ua',
+          language: 'en',
+          sua: { source: 2, browsers: [{ brand: 'Chromium', version: ['149'] }] },
+        },
+      };
+      const { validBR, bidderRequest } = createRequestMock({ ortb2 });
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.device.ua).to.equal('core-enriched-ua');
+      expect(data.device.language).to.equal('en');
+      expect(data.device.sua).to.deep.equal(ortb2.device.sua);
     });
 
-    it('should use placementId value as imp.tagid in the outbound bid-request when using "zid"', () => {
-      let { validBidRequests, bidderRequest } = generateBuildRequestMock({}),
-        TEST_ZID = 54321;
-      validBidRequests[0].params.zid = TEST_ZID;
-      const data = spec.buildRequests(validBidRequests, bidderRequest).data;
-      expect(data.imp[0].tagid).to.deep.equal(TEST_ZID);
+    it('should add GPP consent to regs when present', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      bidderRequest.gppConsent = {
+        gppString: 'DBABMA~CPXxRfAPXxRfAAfKABENB-CgAAAAAAAAAAYgAAAAAAAA',
+        applicableSections: [7],
+      };
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.regs.gpp).to.equal(bidderRequest.gppConsent.gppString);
+      expect(data.regs.gpp_sid).to.deep.equal([7]);
+    });
+
+    it('should not add GPP consent to regs when absent', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.regs.gpp).to.be.undefined;
+      expect(data.regs.gpp_sid).to.be.undefined;
+    });
+
+    it('should set site.id from params.sid', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      validBR[0].params.sid = '9876543210';
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.site.id).to.equal('9876543210');
+    });
+
+    it('should set app.id (and no site) for app requests', () => {
+      const ortb2 = { app: { bundle: 'com.adtarget.example' } };
+      const { validBR, bidderRequest } = createRequestMock({ ortb2 });
+      const request = buildFirst(validBR, bidderRequest);
+      expect(request.data.app.id).to.equal(DEFAULT_SID);
+      expect(request.data.app.bundle).to.equal('com.adtarget.example');
+      expect(request.data.site).to.be.undefined;
+      expect(request.url).to.equal('https://rtb.cdn.adtarget.market/ssp?prebid&s=' + DEFAULT_SID);
+    });
+
+    it('should set imp.tagid from params.zid', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      validBR[0].params.zid = '54321';
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.imp[0].tagid).to.equal('54321');
+    });
+
+    it('should pass through ortb2 site fields', () => {
+      const ortb2 = { site: { name: 'a-name', cat: ['IAB1'] } };
+      const { validBR, bidderRequest } = createRequestMock({ ortb2 });
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.site.name).to.equal('a-name');
+      expect(data.site.cat).to.deep.equal(['IAB1']);
+    });
+
+    it('should pass through ortb2 user fields', () => {
+      const ortb2 = { user: { id: 'user-1', ext: { a: '123', b: '456' } } };
+      const { validBR, bidderRequest } = createRequestMock({ ortb2 });
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.user.id).to.equal('user-1');
+      expect(data.user.ext).to.deep.include({ a: '123', b: '456' });
+    });
+
+    it('should pass through ortb2Imp.ext.data', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      validBR[0].ortb2Imp = { ext: { data: { pbadslot: 'homepage-top-rect', adUnitSpecificAttribute: '123' } } };
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.imp[0].ext.data).to.deep.equal(validBR[0].ortb2Imp.ext.data);
+    });
+
+    it('should pass through ortb2Imp.instl === 1', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      validBR[0].ortb2Imp = { instl: 1 };
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.imp[0].instl).to.equal(1);
     });
   });
 
-  describe('Request Payload oRTB bid.imp validation:', () => {
-    // Validate Banner imp imp when adtrgtme.mode=undefined
-    it('should generate a valid "Banner" imp object', () => {
-      config.setConfig({
-        adtrgtme: {}
-      });
-      const { validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-      expect(data.imp[0].banner).to.deep.equal({
-        mimes: ['text/html', 'text/javascript', 'application/javascript', 'image/jpg'],
-        format: [{w: 300, h: 250}]
-      });
+  describe('Bidfloor support', () => {
+    it('should set imp.bidfloor and request currency from the price floors module', () => {
+      const { bidRequest, validBR, bidderRequest } = createRequestMock();
+      bidRequest.getFloor = () => ({ floor: 1.111, currency: 'AUD' });
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.cur).to.deep.equal(['AUD']);
+      expect(data.imp[0].bidfloor).to.equal(1.111);
     });
 
-    // Validate Banner imp
-    it('should generate a valid "Banner" imp object', () => {
-      config.setConfig({
-        adtrgtme: { mode: 'banner' }
+    it('should set imp.bidfloor from params.bidOverride.imp as a fallback', () => {
+      const { validBR, bidderRequest } = createRequestMock({
+        bidOverride: { imp: { bidfloor: 2.5, bidfloorcur: 'EUR' } },
       });
-      const { validBidRequests, bidderRequest } = generateBuildRequestMock({});
-      const data = spec.buildRequests(validBidRequests, bidderRequest)[0].data;
-      expect(data.imp[0].banner).to.deep.equal({
-        mimes: ['text/html', 'text/javascript', 'application/javascript', 'image/jpg'],
-        format: [{w: 300, h: 250}]
-      });
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.imp[0].bidfloor).to.equal(2.5);
+      expect(data.imp[0].bidfloorcur).to.equal('EUR');
+      expect(data.cur).to.deep.equal(['EUR']);
+    });
+
+    it('should query getFloor with the sole media type (banner-specific floor rule)', () => {
+      const { bidRequest, validBR, bidderRequest } = createRequestMock();
+      // floor is defined only for the banner media type, not the '*' wildcard
+      bidRequest.getFloor = ({ mediaType }) =>
+        (mediaType === 'banner' ? { floor: 2.0, currency: 'USD' } : {});
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.imp[0].bidfloor).to.equal(2.0);
     });
   });
 
-  describe('interpretResponse()', () => {
-    describe('for mediaTypes: "banner"', () => {
-      it('should insert banner payload into response[0].ad', () => {
-        const { serverResponse, bidderRequest } = generateResponseMock('banner');
-        const response = spec.interpretResponse(serverResponse, {bidderRequest});
-        expect(response[0].ad).to.equal('<script>logInfo(\'ad\'); AdPlacement </script>');
-        expect(response[0].mediaType).to.equal('banner');
-      })
+  describe('Schain support', () => {
+    it('should forward ortb2.source.ext.schain to source.schain', () => {
+      const { bidRequest, validBR, bidderRequest } = createRequestMock();
+      const globalSchain = {
+        ver: '1.0',
+        complete: 1,
+        nodes: [{ asi: 'adtarget-partner.com', sid: '1234567890', rid: bidRequest.bidId, hp: 1 }],
+      };
+      bidRequest.ortb2 = { source: { ext: { schain: globalSchain } } };
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.source.schain.nodes).to.have.lengthOf(1);
+      expect(data.source.schain).to.equal(globalSchain);
+    });
+  });
+
+  describe('Media type imps', () => {
+    it('should build a default banner imp', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      const { data } = buildFirst(validBR, bidderRequest);
+      expect(data.imp[0].banner).to.deep.include({
+        mimes: ['text/html', 'text/javascript', 'application/javascript', 'image/jpg'],
+        format: [{ w: 300, h: 250 }],
+      });
+      expect(data.imp[0].secure).to.equal(1);
     });
 
-    describe('Support Advertiser domains', () => {
-      it('should append bid-response adomain to meta.advertiserDomains', () => {
-        const { serverResponse, bidderRequest } = generateResponseMock('banner');
-        const response = spec.interpretResponse(serverResponse, {bidderRequest});
-        expect(response[0].meta.advertiserDomains).to.be.a('array');
-        expect(response[0].meta.advertiserDomains[0]).to.equal('advertiser-domain.com');
-      })
+    if (FEATURES.VIDEO) {
+      it('should build a video imp and drop non-ORTB params', () => {
+        const mediaTypes = {
+          video: {
+            playerSize: [[640, 480]],
+            mimes: ['video/mp4'],
+            protocols: [2, 3],
+            api: [2],
+            maxduration: 30,
+            context: 'instream',
+          },
+        };
+        const { validBR, bidderRequest } = createRequestMock({ mediaTypes });
+        const { data } = buildFirst(validBR, bidderRequest);
+        expect(data.imp[0].video).to.deep.include({
+          mimes: ['video/mp4'],
+          protocols: [2, 3],
+          api: [2],
+          maxduration: 30,
+          w: 640,
+          h: 480,
+        });
+        expect(data.imp[0].video.context).to.be.undefined;
+        expect(data.imp[0].banner).to.be.undefined;
+      });
+
+      it('should support multi-format (banner + video) imps', () => {
+        const mediaTypes = {
+          banner: { sizes: [[300, 250]] },
+          video: { playerSize: [[300, 250]], mimes: ['video/mp4'] },
+        };
+        const { validBR, bidderRequest } = createRequestMock({ mediaTypes });
+        const { data } = buildFirst(validBR, bidderRequest);
+        expect(data.imp[0].banner).to.exist;
+        expect(data.imp[0].video).to.deep.include({ mimes: ['video/mp4'], w: 300, h: 250 });
+      });
+    }
+
+    if (FEATURES.NATIVE) {
+      it('should build a native imp from nativeOrtbRequest', () => {
+        const mediaTypes = { native: { ortb: { assets: [] } } };
+        const { validBR, bidderRequest } = createRequestMock({ mediaTypes });
+        validBR[0].nativeOrtbRequest = {
+          ver: '1.2',
+          assets: [{ id: 1, required: 1, title: { len: 80 } }],
+        };
+        const { data } = buildFirst(validBR, bidderRequest);
+        expect(data.imp[0].native).to.exist;
+        expect(data.imp[0].native.ver).to.equal('1.2');
+        const nativeReq = JSON.parse(data.imp[0].native.request);
+        expect(nativeReq.assets).to.have.lengthOf(1);
+        expect(nativeReq.assets[0].title.len).to.equal(80);
+        expect(data.imp[0].banner).to.be.undefined;
+      });
+
+      it('should skip the native imp when no assets are specified', () => {
+        const mediaTypes = { native: { ortb: { assets: [] } } };
+        const { validBR, bidderRequest } = createRequestMock({ mediaTypes });
+        validBR[0].nativeOrtbRequest = { assets: [] };
+        const { data } = buildFirst(validBR, bidderRequest);
+        expect(data.imp[0].native).to.be.undefined;
+      });
+    }
+  });
+
+  describe('interpretResponse', () => {
+    const buildAndInterpret = (bid, opts = {}) => {
+      const { validBR, bidderRequest } = createRequestMock(opts);
+      const request = buildFirst(validBR, bidderRequest);
+      return spec.interpretResponse(createServerResponse(bid), request);
+    };
+
+    it('should return [] for an empty response', () => {
+      const { validBR, bidderRequest } = createRequestMock();
+      const request = buildFirst(validBR, bidderRequest);
+      expect(spec.interpretResponse({ body: {} }, request)).to.deep.equal([]);
     });
 
-    describe('bid response Ad ID / Creative ID', () => {
-      it('should use adId if it exists in the bid-response', () => {
-        const { serverResponse, bidderRequest } = generateResponseMock('banner');
-        const adId = 'bid-response-adId';
-        serverResponse.body.seatbid[0].bid[0].adId = adId;
-        const response = spec.interpretResponse(serverResponse, {bidderRequest});
-        expect(response[0].adId).to.equal(adId);
+    it('should interpret a banner bid into bidResponse.ad', () => {
+      const adm = `<script>(new Image()).src="${DEFAULT_PIXEL_URL}"</script>\n<img src="${DEFAULT_BANNER_URL}" />`;
+      const response = buildAndInterpret(createSeatBid({ adm }));
+      expect(response[0].mediaType).to.equal('banner');
+      expect(response[0].ad).to.equal(adm);
+      expect(response[0].meta.mediaType).to.equal('banner');
+    });
+
+    it('should expose advertiser domains in meta', () => {
+      const response = buildAndInterpret(createSeatBid({ adm: '<div>ad</div>' }));
+      expect(response[0].meta.advertiserDomains).to.deep.equal(['some-advertiser-domain.com']);
+    });
+
+    if (FEATURES.VIDEO) {
+      it('should set mediaType video with vastXml/vastUrl', () => {
+        const response = buildAndInterpret(
+          createSeatBid({ mtype: 2, adm: '<VAST version="4.0"></VAST>', nurl: 'https://vast.example/win' }),
+          { mediaTypes: { video: { playerSize: [[640, 480]], mimes: ['video/mp4'] } } }
+        );
+        expect(response[0].mediaType).to.equal('video');
+        expect(response[0].vastXml).to.equal('<VAST version="4.0"></VAST>');
+        expect(response[0].vastUrl).to.equal('https://vast.example/win');
+        expect(response[0].ad).to.be.undefined;
       });
 
-      it('should use impid if adId does not exist in the bid-response', () => {
-        const { serverResponse, bidderRequest } = generateResponseMock('banner');
-        const impid = '25b6c429c1f52f';
-        serverResponse.body.seatbid[0].bid[0].impid = impid;
-        const response = spec.interpretResponse(serverResponse, {bidderRequest});
-        expect(response[0].adId).to.equal(impid);
+      it('should infer video mediaType from VAST markup when mtype is absent', () => {
+        const response = buildAndInterpret(
+          createSeatBid({ mtype: undefined, adm: '<VAST version="4.0"></VAST>' }),
+          { mediaTypes: { video: { playerSize: [[640, 480]], mimes: ['video/mp4'] } } }
+        );
+        expect(response[0].mediaType).to.equal('video');
       });
 
-      it('should use crid if adId & impid do not exist in the bid-response', () => {
-        const { serverResponse, bidderRequest } = generateResponseMock('banner');
-        const crid = 'passback-12579';
-        serverResponse.body.seatbid[0].bid[0].impid = undefined;
-        serverResponse.body.seatbid[0].bid[0].crid = crid;
-        const response = spec.interpretResponse(serverResponse, {bidderRequest});
-        expect(response[0].adId).to.equal(crid);
+      it('should infer video mediaType from the matched imp when mtype/adm are absent and only nurl is set', () => {
+        const response = buildAndInterpret(
+          createSeatBid({ mtype: undefined, adm: undefined, nurl: 'https://vast.example/win' }),
+          { mediaTypes: { video: { playerSize: [[640, 480]], mimes: ['video/mp4'] } } }
+        );
+        expect(response[0].mediaType).to.equal('video');
+        expect(response[0].vastUrl).to.equal('https://vast.example/win');
+        expect(response[0].ad).to.be.undefined;
+      });
+    }
+
+    if (FEATURES.NATIVE) {
+      it('should parse an ORTB native adm into native.ortb', () => {
+        const ortbNative = {
+          ver: '1.2',
+          assets: [{ id: 1, title: { text: 'Native title' } }],
+          link: { url: 'https://click.example' },
+        };
+        const response = buildAndInterpret(
+          createSeatBid({ mtype: 4, adm: JSON.stringify(ortbNative), crid: 'native-crid' }),
+          { mediaTypes: { native: { ortb: { assets: [] } } } }
+        );
+        expect(response[0].mediaType).to.equal('native');
+        expect(response[0].native.ortb).to.deep.equal(ortbNative);
+        expect(response[0].ad).to.be.undefined;
+      });
+
+      it('should drop a native bid-response that contains no assets', () => {
+        const response = buildAndInterpret(
+          createSeatBid({ mtype: 4, adm: '{"ver":"1.2"}' }),
+          { mediaTypes: { native: { ortb: { assets: [] } } } }
+        );
+        expect(response).to.have.lengthOf(0);
+      });
+
+      it('should infer native mediaType from JSON markup when mtype is absent', () => {
+        const ortbNative = { ver: '1.2', assets: [{ id: 1, title: { text: 'x' } }] };
+        const response = buildAndInterpret(
+          createSeatBid({ mtype: undefined, adm: JSON.stringify(ortbNative), crid: 'native-crid' }),
+          { mediaTypes: { native: { ortb: { assets: [] } } } }
+        );
+        expect(response[0].mediaType).to.equal('native');
+        expect(response[0].native.ortb).to.deep.equal(ortbNative);
+      });
+    }
+
+    describe('adId fallbacks', () => {
+      it('should use adId if present', () => {
+        const response = buildAndInterpret(createSeatBid({ adId: 'bid-response-adId', adm: '<div>ad</div>' }));
+        expect(response[0].adId).to.equal('bid-response-adId');
+      });
+      it('should fall back to impid when adId missing', () => {
+        const response = buildAndInterpret(createSeatBid({ adm: '<div>ad</div>' }));
+        expect(response[0].adId).to.equal(DEFAULT_BID_ID);
       });
     });
 
-    describe('Time To Live (ttl)', () => {
-      const UNSUPPORTED_TTL_FORMATS = ['string', [1, 2, 3], true, false, null, undefined];
-      UNSUPPORTED_TTL_FORMATS.forEach(param => {
-        it('should not allow unsupported global adtrgtme.ttl formats and default to 300', () => {
-          const { serverResponse, bidderRequest } = generateResponseMock('banner');
-          config.setConfig({
-            adtrgtme: { ttl: param }
-          });
-          const response = spec.interpretResponse(serverResponse, {bidderRequest});
+    describe('currency', () => {
+      const interpret = (body) => {
+        const { validBR, bidderRequest } = createRequestMock();
+        const request = buildFirst(validBR, bidderRequest);
+        return spec.interpretResponse({ body }, request);
+      };
+
+      it('should keep the top-level response currency instead of forcing USD', () => {
+        const response = interpret({
+          cur: 'EUR',
+          seatbid: [{ bid: [createSeatBid({ adm: '<div>ad</div>' })] }],
+        });
+        expect(response[0].currency).to.equal('EUR');
+      });
+
+      it('should let a non-standard per-bid cur override the response currency', () => {
+        const response = interpret({
+          cur: 'EUR',
+          seatbid: [{ bid: [createSeatBid({ adm: '<div>ad</div>', cur: 'GBP' })] }],
+        });
+        expect(response[0].currency).to.equal('GBP');
+      });
+    });
+
+    describe('ttl resolution', () => {
+      const interpretWithTtl = (configure) => {
+        const { validBR, bidderRequest } = createRequestMock();
+        configure(validBR, bidderRequest);
+        const request = buildFirst(validBR, bidderRequest);
+        return spec.interpretResponse(createServerResponse(createSeatBid({ adm: '<div>ad</div>' })), request);
+      };
+
+      const BAD_TTL = ['string', [1, 2, 3], true, false, null, undefined, -1, 12345];
+      BAD_TTL.forEach((value) => {
+        it(`should default to 300 for invalid global ttl ${JSON.stringify(value)}`, () => {
+          const response = interpretWithTtl(() => config.setConfig({ adtrgtme: { ttl: value } }));
           expect(response[0].ttl).to.equal(300);
         });
-
-        it('should not allow unsupported params.ttl formats and default to 300', () => {
-          const { serverResponse, bidderRequest } = generateResponseMock('banner');
-          bidderRequest.bids[0].params.ttl = param;
-          const response = spec.interpretResponse(serverResponse, {bidderRequest});
+        it(`should default to 300 for invalid params.ttl ${JSON.stringify(value)}`, () => {
+          const response = interpretWithTtl((validBR) => { validBR[0].params.ttl = value; });
           expect(response[0].ttl).to.equal(300);
         });
       });
 
-      const UNSUPPORTED_TTL_VALUES = [-1, 3601];
-      UNSUPPORTED_TTL_VALUES.forEach(param => {
-        it('should not allow invalid global adtrgtme.ttl values 3600 < ttl < 0 and default to 300', () => {
-          const { serverResponse, bidderRequest } = generateResponseMock('banner');
-          config.setConfig({
-            adtrgtme: { ttl: param }
-          });
-          const response = spec.interpretResponse(serverResponse, {bidderRequest});
-          expect(response[0].ttl).to.equal(300);
+      it('should prefer global ttl over params.ttl', () => {
+        const response = interpretWithTtl((validBR) => {
+          config.setConfig({ adtrgtme: { ttl: 500 } });
+          validBR[0].params.ttl = 400;
         });
-
-        it('should not allow invalid params.ttl values 3600 < ttl < 0 and default to 300', () => {
-          const { serverResponse, bidderRequest } = generateResponseMock('banner');
-          bidderRequest.bids[0].params.ttl = param;
-          const response = spec.interpretResponse(serverResponse, {bidderRequest});
-          expect(response[0].ttl).to.equal(300);
-        });
-      });
-
-      it('should give presedence to Gloabl ttl over params.ttl ', () => {
-        const { serverResponse, bidderRequest } = generateResponseMock('banner');
-        config.setConfig({
-          adtrgtme: { ttl: 500 }
-        });
-        bidderRequest.bids[0].params.ttl = 400;
-        const response = spec.interpretResponse(serverResponse, {bidderRequest});
         expect(response[0].ttl).to.equal(500);
       });
+
+      it('should use a valid params.ttl', () => {
+        const response = interpretWithTtl((validBR) => { validBR[0].params.ttl = 400; });
+        expect(response[0].ttl).to.equal(400);
+      });
+    });
+  });
+
+  describe('getUserSyncs', () => {
+    const BAD_SYNC_URL = 'cdn.adtarget.me/libs/1x1.gif?image&rnd=5fr55r';
+    const IMAGE_SYNC_URL = `${DEFAULT_PIXEL_URL}?image&rnd=5fr55r`;
+    const IFRAME_SYNC_ONE_URL = `${DEFAULT_PIXEL_URL}?iframe1&rnd=5fr55r`;
+    const IFRAME_SYNC_TWO_URL = `${DEFAULT_PIXEL_URL}?iframe2&rnd=5fr55r`;
+
+    let serverResponses;
+    beforeEach(() => {
+      serverResponses = [{
+        body: {
+          ext: {
+            pixels: [
+              ['image', BAD_SYNC_URL],
+              ['invalid', IMAGE_SYNC_URL],
+              ['image', IMAGE_SYNC_URL],
+              ['iframe', IFRAME_SYNC_ONE_URL],
+              ['iframe', IFRAME_SYNC_TWO_URL],
+            ],
+          },
+        },
+      }];
     });
 
-    describe('Aliasing support', () => {
-      it('should return undefined as the bidder code value', () => {
-        const { serverResponse, bidderRequest } = generateResponseMock('banner');
-        const response = spec.interpretResponse(serverResponse, {bidderRequest});
-        expect(response[0].bidderCode).to.be.undefined;
-      });
+    it('should return [] when no sync is enabled', () => {
+      expect(spec.getUserSyncs({ pixelEnabled: false, iframeEnabled: false }, serverResponses)).to.deep.equal([]);
+    });
+
+    it('should skip bad urls and unknown types', () => {
+      const syncs = spec.getUserSyncs({ iframeEnabled: true, pixelEnabled: true }, serverResponses);
+      expect(syncs).to.have.lengthOf(3);
+    });
+
+    it('should return iframe syncs only', () => {
+      const syncs = spec.getUserSyncs({ iframeEnabled: true, pixelEnabled: false }, serverResponses);
+      expect(syncs).to.deep.equal([
+        { type: 'iframe', url: IFRAME_SYNC_ONE_URL },
+        { type: 'iframe', url: IFRAME_SYNC_TWO_URL },
+      ]);
+    });
+
+    it('should return image syncs only', () => {
+      const syncs = spec.getUserSyncs({ iframeEnabled: false, pixelEnabled: true }, serverResponses);
+      expect(syncs).to.deep.equal([{ type: 'image', url: IMAGE_SYNC_URL }]);
+    });
+
+    it('should append consent params when consent is provided', () => {
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: false, pixelEnabled: true },
+        serverResponses,
+        { gdprApplies: true, consentString: 'consent-123' },
+        '1YNN'
+      );
+      expect(syncs[0].url).to.include('gdpr=1');
+      expect(syncs[0].url).to.include('gdpr_consent=consent-123');
+      expect(syncs[0].url).to.include('us_privacy=1YNN');
+    });
+
+    it('should append gpp params when gpp consent is provided', () => {
+      const syncs = spec.getUserSyncs(
+        { iframeEnabled: false, pixelEnabled: true },
+        serverResponses,
+        undefined,
+        undefined,
+        { gppString: 'DBABMA~CPXxRfA', applicableSections: [7] }
+      );
+      expect(syncs[0].url).to.include('gpp=DBABMA');
+      expect(syncs[0].url).to.include('gpp_sid=7');
     });
   });
 });

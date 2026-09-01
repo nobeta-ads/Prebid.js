@@ -1,9 +1,11 @@
-import { BANNER } from '../src/mediaTypes.js';
-import { getBidFloor } from '../libraries/equativUtils/equativUtils.js'
 import { ortbConverter } from '../libraries/ortbConverter/converter.js';
+import { handleCookieSync, PID_STORAGE_NAME, prepareSplitImps } from '../libraries/equativUtils/equativUtils.js';
 import { registerBidder } from '../src/adapters/bidderFactory.js';
+import { config } from '../src/config.js';
+import { BANNER, NATIVE, VIDEO } from '../src/mediaTypes.js';
+import { Renderer } from '../src/Renderer.js';
 import { getStorageManager } from '../src/storageManager.js';
-import { deepAccess, deepSetValue, mergeDeep } from '../src/utils.js';
+import { deepAccess, deepSetValue, logError, logWarn, mergeDeep } from '../src/utils.js';
 
 /**
  * @typedef {import('../src/adapters/bidderFactory.js').Bid} Bid
@@ -11,16 +13,70 @@ import { deepAccess, deepSetValue, mergeDeep } from '../src/utils.js';
  */
 
 const BIDDER_CODE = 'equativ';
-const COOKIE_SYNC_ORIGIN = 'https://apps.smartadserver.com';
-const COOKIE_SYNC_URL = `${COOKIE_SYNC_ORIGIN}/diff/templates/asset/csync.html`;
-const PID_COOKIE_NAME = 'eqt_pid';
+const DEFAULT_TTL = 300;
+const LOG_PREFIX = 'Equativ:';
+const OUTSTREAM_RENDERER_URL = 'https://apps.sascdn.com/diff/video-outstream/equativ-video-outstream.js';
+
+let feedbackArray = [];
+let impIdMap = {};
+let networkId = 0;
+let tokens = {};
+
+/**
+ * Gets value of the local variable impIdMap
+ * @returns {*} Value of impIdMap
+ */
+export function getImpIdMap() {
+  return impIdMap;
+}
+
+/**
+ * Evaluates impressions for validity.  The entry evaluated is considered valid if NEITHER of these conditions are met:
+ * 1) it has a `video` property defined for `mediaTypes.video` which is an empty object
+ * 2) it has a `native` property defined for `mediaTypes.native` which is an empty object
+ * @param {*} bidReq A bid request object to evaluate
+ * @returns boolean
+ */
+function isValid(bidReq) {
+  return !(bidReq.mediaTypes.video && JSON.stringify(bidReq.mediaTypes.video) === '{}') && !(bidReq.mediaTypes.native && JSON.stringify(bidReq.mediaTypes.native) === '{}');
+}
+
+/**
+ * Updates bid request with data from previous auction
+ * @param {*} req A bid request object to be updated
+ * @returns {*} Updated bid request object
+ */
+function updateFeedbackData(req) {
+  if (req?.ext?.prebid?.previousauctioninfo) {
+    req.ext.prebid.previousauctioninfo.forEach(info => {
+      if (tokens[info?.bidId]) {
+        feedbackArray.push({
+          feedback_token: tokens[info.bidId],
+          loss: info.bidderCpm === info.highestBidCpm ? 0 : 102,
+          price: info.highestBidCpm
+        });
+
+        delete tokens[info.bidId];
+      }
+    });
+
+    delete req.ext.prebid;
+  }
+
+  if (feedbackArray.length) {
+    deepSetValue(req, 'ext.bid_feedback', feedbackArray[0]);
+    feedbackArray.shift();
+  }
+
+  return req;
+}
 
 export const storage = getStorageManager({ bidderCode: BIDDER_CODE });
 
 export const spec = {
   code: BIDDER_CODE,
   gvlid: 45,
-  supportedMediaTypes: [BANNER],
+  supportedMediaTypes: [BANNER, VIDEO, NATIVE],
 
   /**
    * @param bidRequests
@@ -28,11 +84,44 @@ export const spec = {
    * @returns {ServerRequest[]}
    */
   buildRequests: (bidRequests, bidderRequest) => {
-    return {
-      data: converter.toORTB({ bidderRequest, bidRequests }),
-      method: 'POST',
-      url: 'https://ssb-global.smartadserver.com/api/bid?callerId=169'
-    };
+    if (bidRequests.filter(isValid).length === 0) {
+      logError(`${LOG_PREFIX} No useful bid requests to process. No requests will be sent.`, bidRequests);
+      return undefined;
+    }
+
+    const requests = [];
+
+    bidRequests.forEach(bid => {
+      if (!isValid(bid)) {
+        logWarn(`${LOG_PREFIX} Skipping bid: invalid media types.`, bid.bidId);
+        return;
+      }
+
+      const data = converter.toORTB({ bidRequests: [bid], bidderRequest });
+
+      if (!data) {
+        logWarn(`${LOG_PREFIX} Skipping bid: converter returned empty data.`, bid.bidId);
+        return;
+      }
+
+      if (!data.id) {
+        logWarn(`${LOG_PREFIX} Skipping bid: request is missing required id field.`, bid.bidId);
+        return;
+      }
+
+      if (!data.imp?.length) {
+        logWarn(`${LOG_PREFIX} Skipping bid: no valid impressions after processing.`, bid.bidId);
+        return;
+      }
+
+      requests.push({
+        data,
+        method: 'POST',
+        url: 'https://ssb-global.smartadserver.com/api/bid?callerId=169',
+      });
+    });
+
+    return requests;
   },
 
   /**
@@ -40,11 +129,34 @@ export const spec = {
    * @param bidRequest
    * @returns {Bid[]}
    */
-  interpretResponse: (serverResponse, bidRequest) =>
-    converter.fromORTB({
+  interpretResponse: (serverResponse, bidRequest) => {
+    if (bidRequest.data?.imp?.length) {
+      bidRequest.data.imp.forEach(imp => {
+        imp.id = impIdMap[imp.id];
+      });
+    }
+
+    if (serverResponse.body?.seatbid?.length) {
+      serverResponse.body.seatbid
+        .filter(seat => seat?.bid?.length)
+        .forEach(seat =>
+          seat.bid.forEach(bid => {
+            bid.impid = impIdMap[bid.impid];
+
+            if (deepAccess(bid, 'ext.feedback_token')) {
+              tokens[bid.impid] = bid.ext.feedback_token;
+            }
+
+            bid.ttl = typeof bid.exp === 'number' && bid.exp > 0 ? bid.exp : DEFAULT_TTL;
+          })
+        );
+    }
+
+    return converter.fromORTB({
       request: bidRequest.data,
       response: serverResponse.body,
-    }),
+    });
+  },
 
   /**
    * @param bidRequest
@@ -61,60 +173,73 @@ export const spec = {
 
   /**
    * @param syncOptions
+   * @param serverResponses
+   * @param gdprConsent
    * @returns {{type: string, url: string}[]}
    */
-  getUserSyncs: (syncOptions) => {
-    if (syncOptions.iframeEnabled) {
-      window.addEventListener('message', function handler(event) {
-        if (event.origin === COOKIE_SYNC_ORIGIN && event.data.pid) {
-          const exp = new Date();
-          exp.setTime(Date.now() + 31536000000); // in a year
-          storage.setCookie(PID_COOKIE_NAME, event.data.pid, exp.toUTCString());
-          this.removeEventListener('message', handler);
-        }
-      });
-
-      return [{ type: 'iframe', url: COOKIE_SYNC_URL }];
-    }
-
-    return [];
-  }
+  getUserSyncs: (syncOptions, serverResponses, gdprConsent) =>
+    handleCookieSync(syncOptions, serverResponses, gdprConsent, networkId, storage)
 };
 
 export const converter = ortbConverter({
   context: {
     netRevenue: true,
-    ttl: 300,
+    ttl: DEFAULT_TTL
+  },
+
+  bidResponse(buildBidResponse, bid, context) {
+    const { bidRequest } = context;
+    const bidResponse = buildBidResponse(bid, context);
+
+    if (bidResponse.mediaType === VIDEO && bidRequest.mediaTypes.video.context === 'outstream') {
+      const renderer = Renderer.install({
+        adUnitCode: bidRequest.adUnitCode,
+        id: bidRequest.bidId,
+        url: OUTSTREAM_RENDERER_URL,
+      });
+
+      renderer.setRender((bid) => {
+        bid.renderer.push(() => {
+          window.EquativVideoOutstream.renderAd({
+            slotId: bid.adUnitCode,
+            vast: bid.vastUrl || bid.vastXml
+          });
+        });
+      });
+
+      bidResponse.renderer = renderer;
+    }
+
+    return bidResponse;
   },
 
   imp(buildImp, bidRequest, context) {
     const imp = buildImp(bidRequest, context);
-    const { siteId, pageId, formatId } = bidRequest.params;
+    const { siteId, pageId, formatId, placementuuid } = bidRequest.params || {};
 
     delete imp.dt;
 
-    imp.bidfloor = imp.bidfloor || getBidFloor(bidRequest);
-    imp.secure = bidRequest.ortb2Imp?.secure ?? 1;
+    imp.secure = 1;
     imp.tagid = bidRequest.adUnitCode;
+    imp.displaymanager ||= 'Prebid.js';
+    imp.displaymanagerver ||= '$prebid.version$';
 
-    if (siteId || pageId || formatId) {
-      const bidder = {};
+    if (!deepAccess(bidRequest, 'ortb2Imp.rwdd') && deepAccess(bidRequest, 'mediaTypes.video.ext.rewarded')) {
+      mergeDeep(imp, { rwdd: bidRequest.mediaTypes.video.ext.rewarded });
+    }
 
-      if (siteId) {
-        bidder.siteId = siteId;
-      }
-
-      if (pageId) {
-        bidder.pageId = pageId;
-      }
-
-      if (formatId) {
-        bidder.formatId = formatId;
-      }
-
-      mergeDeep(imp, {
-        ext: { bidder },
-      });
+    // `placementuuid` is the preferred way to identify inventory. The deprecated
+    // `siteId`, `pageId` and `formatId` parameters are kept only to support the ramp-up period.
+    // Forward all provided fields and let the downstream receiver decide which to use.
+    // SSB expects the `placementuuid` value in the OpenRTB extension as `plcmtuuid`.
+    const bidder = {
+      ...(placementuuid && { plcmtuuid: placementuuid }),
+      ...(siteId && { siteId }),
+      ...(pageId && { pageId }),
+      ...(formatId && { formatId })
+    };
+    if (Object.keys(bidder).length) {
+      mergeDeep(imp.ext, { bidder });
     }
 
     return imp;
@@ -122,25 +247,43 @@ export const converter = ortbConverter({
 
   request(buildRequest, imps, bidderRequest, context) {
     const bid = context.bidRequests[0];
-    const req = buildRequest(imps, bidderRequest, context);
+    const currency = config.getConfig('currency.adServerCurrency') || 'USD';
+    const splitImps = prepareSplitImps(imps, bid, currency, impIdMap, 'eqtv');
 
-    if (deepAccess(bid, 'ortb2.site.publisher')) {
-      deepSetValue(req, 'site.publisher.id', bid.ortb2.site.publisher.id || bid.params.networkId);
-    } else if (deepAccess(bid, 'ortb2.app.publisher')) {
-      deepSetValue(req, 'app.publisher.id', bid.ortb2.app.publisher.id || bid.params.networkId);
-    } else if (deepAccess(bid, 'ortb2.dooh.publisher')) {
-      deepSetValue(req, 'dooh.publisher.id', bid.ortb2.dooh.publisher.id || bid.params.networkId);
-    } else {
-      deepSetValue(req, 'site.publisher.id', bid.params.networkId);
+    let req = buildRequest(splitImps, bidderRequest, context);
+
+    if (!splitImps?.length) {
+      return req;
     }
 
-    const pid = storage.getCookie(PID_COOKIE_NAME);
+    let env = ['ortb2.site.publisher', 'ortb2.app.publisher', 'ortb2.dooh.publisher'].find(propPath => deepAccess(bid, propPath)) || 'ortb2.site.publisher';
+    networkId = deepAccess(bid, env + '.id') || deepAccess(bid, 'params.networkId');
+    deepSetValue(req, env.replace('ortb2.', '') + '.id', networkId);
+
+    [
+      { path: 'mediaTypes.video', props: ['mimes', 'placement'] },
+      { path: 'ortb2Imp.audio', props: ['mimes'] },
+      { path: 'mediaTypes.native.ortb', props: ['privacy', 'plcmttype', 'eventtrackers'] },
+    ].forEach(({ path, props }) => {
+      if (deepAccess(bid, path)) {
+        props.forEach(prop => {
+          if (!deepAccess(bid, `${path}.${prop}`)) {
+            logWarn(`${LOG_PREFIX} Property "${path}.${prop}" is missing from request. Request will proceed, but the use of "${prop}" is strongly encouraged.`, bid.bidId);
+          }
+        });
+      }
+    });
+
+    const pid = storage.getDataFromLocalStorage(PID_STORAGE_NAME);
     if (pid) {
       deepSetValue(req, 'user.buyeruid', pid);
     }
+    deepSetValue(req, 'ext.equativprebidjsversion', '$prebid.version$');
+
+    req = updateFeedbackData(req);
 
     return req;
-  },
+  }
 });
 
 registerBidder(spec);
