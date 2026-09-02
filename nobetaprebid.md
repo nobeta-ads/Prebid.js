@@ -20,17 +20,22 @@ npm update
 - Smart Adserver
 - SeedTag
 - Smile Wanted - adicionado em 07/11/24
+- Onetag - adicionado em 02/09/26
 
 ## Módulos
 - Supply Chain Object ( schain)
 - Demand Chain Object ( dchain )
 - Currency ( currency )
-- Fledge (PAAPI) for GPT ~~( fledgeForGpt )~~ ( paapiForGpt )
+- ~~Fledge (PAAPI) for GPT ( fledgeForGpt ) ( paapiForGpt )~~ - Removido 02/09/26 descontinuado na versão 11 do prebidJS
+- Shared ID ( sharedIdSystem ) - Auditoria 2026
+- User ID ( userId ) - Auditoria 2026
 
 ## Módulos Padrões
 - ~~Consent Management - GDPR ( consentManagement )~~ Não disponivel
 - Consent Management - GPP ( consentManagementGpp )
 - Consent Management - US Privacy ( consentManagementUsp )
+- Consent Management - TCF Europa ( consentManagementTcf )
+- TCF Control - TCF Europa ( tcfControl )
 
 ## Object Global Name
 
@@ -40,7 +45,7 @@ Caso seja nsecessário, alterar o valor "globalVarName" no arquivo package.json.
 ## Build
 
 ```
-gulp build --modules=consentManagementGpp,consentManagementUsp,adponeBidAdapter,appnexusBidAdapter,rtbhouseBidAdapter,smartadserverBidAdapter,seedtagBidAdapter,smilewantedBidAdapter,currency,schain,dchain,paapiForGpt
+gulp build --modules=consentManagementTcf,tcfControl,sharedIdSystem,userId,consentManagementGpp,consentManagementUsp,adponeBidAdapter,appnexusBidAdapter,rtbhouseBidAdapter,smartadserverBidAdapter,seedtagBidAdapter,smilewantedBidAdapter,onetagBidAdapter,currency,schain,dchain
 ```
 
 ## Saída do arquivo
