@@ -494,6 +494,18 @@ describe('Taboola Adapter', function () {
     });
 
     describe('first party data', function () {
+      it('should use params.bcat, badv and wlang when the bidder request has no ortb2', function () {
+        const { ortb2, ...bidderRequest } = commonBidderRequest;
+        const bidRequest = {
+          ...defaultBidRequest,
+          params: { ...commonBidRequest.params, bcat: ['IAB1'], badv: ['blocked.com'], wlang: ['fr'] }
+        };
+        const [res] = spec.buildRequests([bidRequest], bidderRequest);
+        expect(res.data.bcat).to.deep.equal(['IAB1']);
+        expect(res.data.badv).to.deep.equal(['blocked.com']);
+        expect(res.data.wlang).to.deep.equal(['fr']);
+      });
+
       it('should parse first party data', function () {
         const bidderRequest = {
           ...commonBidderRequest,
@@ -650,6 +662,22 @@ describe('Taboola Adapter', function () {
         const [res] = spec.buildRequests([defaultBidRequest], { ...commonBidderRequest, ortb2 });
         expect(res.data.regs.ext.gpp).to.equal('testGpp');
         expect(res.data.regs.ext.gpp_sid).to.deep.equal([1, 2, 3]);
+      });
+
+      it('should keep the OpenRTB 2.6 regs fields from ortb2 when it has no regs.ext', function () {
+        const ortb2 = {
+          regs: {
+            gpp: 'testGpp',
+            gpp_sid: [1, 2, 3],
+            us_privacy: '1YNN',
+            gdpr: 1
+          }
+        };
+
+        const [res] = spec.buildRequests([defaultBidRequest], { ...commonBidderRequest, ortb2 });
+        expect(res.data.regs).to.include({ gpp: 'testGpp', us_privacy: '1YNN', gdpr: 1 });
+        expect(res.data.regs.gpp_sid).to.deep.equal([1, 2, 3]);
+        expect(res.data.regs.ext.gpp).to.equal('testGpp');
       });
 
       it('should pass us privacy consent', function () {
@@ -1418,6 +1446,65 @@ describe('Taboola Adapter', function () {
         expect(res.data.device.ext.scroll.left).to.be.a('number');
       });
 
+      describe('user interaction signals in device.ext.bs', function () {
+        afterEach(function () {
+          delete window.TRC;
+        });
+
+        it('should forward getCtx result verbatim as device.ext.bs', function () {
+          window.TRC = { getCtx: () => ({ lm: 1234, lt: -1 }) };
+          const [res] = spec.buildRequests([defaultBidRequest], commonBidderRequest);
+          expect(res.data.device.ext.bs).to.deep.equal({ lm: 1234, lt: -1 });
+        });
+
+        it('should omit bs when window.TRC is not available', function () {
+          const [res] = spec.buildRequests([defaultBidRequest], commonBidderRequest);
+          expect(res.data.device.ext).to.not.have.property('bs');
+        });
+
+        it('should omit bs when getCtx returns undefined', function () {
+          window.TRC = { getCtx: () => undefined };
+          const [res] = spec.buildRequests([defaultBidRequest], commonBidderRequest);
+          expect(res.data.device.ext).to.not.have.property('bs');
+        });
+
+        it('should omit bs when getCtx throws', function () {
+          window.TRC = { getCtx: () => { throw new Error('boom'); } };
+          const [res] = spec.buildRequests([defaultBidRequest], commonBidderRequest);
+          expect(res.data.device.ext).to.not.have.property('bs');
+        });
+
+        it('should strip bs inherited from ortb2 device.ext when no fresh signal is available', function () {
+          const bidderRequest = {
+            ...commonBidderRequest,
+            ortb2: { device: { ext: { bs: { lm: 1, lt: 2 }, other: 'keep' } } }
+          };
+          const [res] = spec.buildRequests([defaultBidRequest], bidderRequest);
+          expect(res.data.device.ext).to.not.have.property('bs');
+          expect(res.data.device.ext.other).to.equal('keep');
+        });
+
+        it('should override bs inherited from ortb2 device.ext with the fresh signal', function () {
+          window.TRC = { getCtx: () => ({ lm: 10, lt: 20 }) };
+          const bidderRequest = {
+            ...commonBidderRequest,
+            ortb2: { device: { ext: { bs: { lm: 1, lt: 2 } } } }
+          };
+          const [res] = spec.buildRequests([defaultBidRequest], bidderRequest);
+          expect(res.data.device.ext.bs).to.deep.equal({ lm: 10, lt: 20 });
+        });
+
+        it('should resolve getCtx at auction time and stop sending bs once it is removed', function () {
+          window.TRC = { getCtx: () => ({ lm: 5, lt: 6 }) };
+          const [first] = spec.buildRequests([defaultBidRequest], commonBidderRequest);
+          expect(first.data.device.ext.bs).to.deep.equal({ lm: 5, lt: 6 });
+
+          delete window.TRC.getCtx;
+          const [second] = spec.buildRequests([defaultBidRequest], commonBidderRequest);
+          expect(second.data.device.ext).to.not.have.property('bs');
+        });
+      });
+
       it('should include viewability in imp.ext when element exists', function () {
         const adUnitCode = 'test-viewability-div';
         const testDiv = document.createElement('div');
@@ -1826,8 +1913,8 @@ describe('Taboola Adapter', function () {
       });
     });
 
-    describe('interpretResponse', function () {
-      if (FEATURES.NATIVE) {
+    if (FEATURES.NATIVE) {
+      describe('interpretResponse', function () {
         it('should interpret native response correctly', function () {
           const nativeBidRequest = {
             bidder: 'taboola',
@@ -1888,8 +1975,8 @@ describe('Taboola Adapter', function () {
           expect(res[0].native.ortb).to.deep.equal(nativeAdm);
           expect(res[0]).to.not.have.property('ad');
         });
-      }
-    });
+      });
+    }
 
     if (FEATURES.NATIVE) {
       describe('multiformat support', function () {
