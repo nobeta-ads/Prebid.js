@@ -15,16 +15,18 @@ npm update
 
 ## Adapters
 - AdPone
-- AppNexus
+- ~~AppNexus~~ - Removido em 17/11/26 após auditoria da Claude por Fabrício
 - RTBHouse
-- Smart Adserver
+- ~~Smart Adserver~~ - Removido em 17/11/26 após auditoria da Claude por Fabrício
 - SeedTag
-- Smile Wanted - adicionado em 07/11/24
+- ~~Smile Wanted~~ - adicionado em 07/11/24
 - Onetag - adicionado em 02/09/26
+- Global Sun - adicionado 17/11/26
+- Axis - adicionado 17/11/26
 
 ## Módulos
-- Supply Chain Object ( schain)
-- Demand Chain Object ( dchain )
+- ~~Supply Chain Object ( schain)~~ - Removido em 17/11/26 após auditoria da Claude por Fabrício
+- ~~Demand Chain Object ( dchain )~~ - Removido em 17/11/26 após auditoria da Claude por Fabrício
 - Currency ( currency )
 - ~~Fledge (PAAPI) for GPT ( fledgeForGpt ) ( paapiForGpt )~~ - Removido 02/09/26 descontinuado na versão 11 do prebidJS
 - Shared ID ( sharedIdSystem ) - Auditoria 2026
@@ -32,8 +34,8 @@ npm update
 
 ## Módulos Padrões
 - ~~Consent Management - GDPR ( consentManagement )~~ Não disponivel
-- Consent Management - GPP ( consentManagementGpp )
-- Consent Management - US Privacy ( consentManagementUsp )
+- ~~Consent Management - GPP ( consentManagementGpp )~~ - Removido em 17/11/26 após auditoria da Claude por Fabrício
+- ~~Consent Management - US Privacy ( consentManagementUsp )~~ - Removido em 17/11/26 após auditoria da Claude por Fabrício
 - Consent Management - TCF Europa ( consentManagementTcf )
 - TCF Control - TCF Europa ( tcfControl )
 
@@ -45,7 +47,7 @@ Caso seja nsecessário, alterar o valor "globalVarName" no arquivo package.json.
 ## Build
 
 ```
-gulp build --modules=consentManagementTcf,tcfControl,sharedIdSystem,userId,consentManagementGpp,consentManagementUsp,adponeBidAdapter,appnexusBidAdapter,rtbhouseBidAdapter,smartadserverBidAdapter,seedtagBidAdapter,smilewantedBidAdapter,onetagBidAdapter,currency,schain,dchain
+gulp build --modules=consentManagementTcf,tcfControl,sharedIdSystem,userId,consentManagementGpp,consentManagementUsp,adponeBidAdapter,rtbhouseBidAdapter,seedtagBidAdapter,smilewantedBidAdapter,onetagBidAdapter,currency,adkernelBidAdapter,axisBidAdapter
 ```
 
 ## Saída do arquivo

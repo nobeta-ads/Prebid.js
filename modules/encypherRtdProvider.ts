@@ -103,7 +103,7 @@ function decodeBase64url(value: unknown): Uint8Array {
   const binary = atob(padded);
   const decoded = Uint8Array.from(binary, character => character.charCodeAt(0));
   if (base64url(decoded) !== value) throw new Error('non-canonical base64url');
-  return decoded;
+  return new Uint8Array(decoded.buffer);
 }
 
 function decodeJson(segment: string): unknown {
@@ -333,7 +333,7 @@ async function verifyRecord(record: C2paSignalV1, jwks: unknown, publisherDomain
     const valid = await window.crypto.subtle.verify(
       { name: 'ECDSA', hash: 'SHA-256' },
       key,
-      signature,
+      signature as Uint8Array<ArrayBuffer>,
       new TextEncoder().encode(segments[0] + '.' + segments[1])
     );
     return valid
